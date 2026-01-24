@@ -11,6 +11,7 @@ from dotenv import load_dotenv
 ASSETS_DIR = Path("assets")
 OUTPUT_DIR = Path("output")
 PROMPTS_DIR = Path("prompts")
+PROCESSED_DIR = ASSETS_DIR / "processed"
 
 
 @dataclass
@@ -24,6 +25,7 @@ class AppConfig:
     assets_dir: Path = ASSETS_DIR
     output_dir: Path = OUTPUT_DIR
     prompts_dir: Path = PROMPTS_DIR
+    processed_dir: Path = PROCESSED_DIR
 
 
 def _env_flag(name: str, default: bool = False) -> bool:

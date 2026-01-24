@@ -23,3 +23,4 @@ htmlcov/
 output/
 vertex.json
 assets/original/
+assets/processed/

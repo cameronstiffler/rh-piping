@@ -87,11 +87,22 @@ def _preserve_donor_luminance(donor_rgb: Image.Image, output_rgb: Image.Image) -
     return Image.merge("YCbCr", (donor_y, out_cb, out_cr)).convert("RGB")
 
 
+def load_mask_image(mask_path: Path, target_size: tuple[int, int]) -> Image.Image:
+    with Image.open(mask_path) as mask_img:
+        mask_img = ImageOps.exif_transpose(mask_img)
+        if mask_img.size != target_size:
+            mask_img = ImageOps.fit(mask_img, target_size, Image.LANCZOS, centering=(0.5, 0.5))
+        if mask_img.mode == "RGBA":
+            return mask_img.getchannel("A")
+        return mask_img.convert("L")
+
+
 def composite_output_with_donor(
     output_bytes: bytes,
     alpha_source: Path,
     apply_mask: bool = True,
     preserve_luminance: bool = False,
+    mask_image: Image.Image | None = None,
 ) -> tuple[bytes, dict]:
     with Image.open(alpha_source) as source_img:
         source_img = ImageOps.exif_transpose(source_img)
@@ -159,6 +170,7 @@ def composite_output_with_donor(
         mask_relaxed = False
         mask_tightened = False
         mask_clipped = False
+        mask_already_multiplied = False
 
         alpha_binary = alpha_channel.point(lambda p: 255 if p > 0 else 0)
         edge_full = donor_rgb.filter(ImageFilter.GaussianBlur(EDGE_DETECT_BLUR)).filter(ImageFilter.FIND_EDGES).convert("L")
@@ -175,7 +187,16 @@ def composite_output_with_donor(
             return 0
 
         edge_thresh = max(MIN_EDGE_THRESHOLD, percentile_threshold(edge_hist, EDGE_TOP_PERCENT))
-        if MASK_FOLLOWS_DONOR:
+        if mask_image is not None:
+            mask = mask_image
+            if mask.mode != "L":
+                mask = mask.convert("L")
+            if mask.size != target_size:
+                mask = ImageOps.fit(mask, target_size, Image.LANCZOS, centering=(0.5, 0.5))
+            mask = ImageChops.multiply(mask, alpha_binary)
+            coverage = coverage_for(mask)
+            mask_already_multiplied = True
+        elif MASK_FOLLOWS_DONOR:
             mask = build_edge_mask(edge_thresh, EDGE_BAND_PX)
             coverage = coverage_for(mask)
             if coverage < MIN_MASK_COVERAGE:
@@ -247,7 +268,8 @@ def composite_output_with_donor(
                     coverage = 0.0
                     mask_clipped = True
 
-        mask = ImageChops.multiply(mask, alpha_binary)
+        if not mask_already_multiplied:
+            mask = ImageChops.multiply(mask, alpha_binary)
         guard_px = EDGE_GUARD_PX
         guard_used = guard_px
         if guard_px > 0:

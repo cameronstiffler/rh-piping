@@ -13,8 +13,10 @@ from rh_piping.images import (
     build_square_model_input,
     composite_output_with_donor,
     convert_to_4k_png,
+    load_mask_image,
 )
 from rh_piping.io import ensure_dir, list_images
+from rh_piping.masks import find_mask_for_product, generate_mask_from_space
 from rh_piping.prompts import prompt_id_from_path
 
 ORIGINAL_ROOT = "original"
@@ -95,12 +97,14 @@ def _first_free_index(indices: set[int]) -> int:
     return candidate
 
 
-def _format_flag_tag(no_mask: bool, preserve_luminance: bool) -> str:
+def _format_flag_tag(no_mask: bool, preserve_luminance: bool, mask_used: bool) -> str:
     flags: list[str] = []
     if no_mask:
         flags.append("nomask")
     if preserve_luminance:
         flags.append("lum")
+    if mask_used:
+        flags.append("mask")
     if not flags:
         return ""
     return f"_FX-{'-'.join(flags)}"
@@ -137,6 +141,11 @@ def run_pipeline(
     limit: int | None = None,
     no_mask: bool = False,
     preserve_luminance: bool = False,
+    generate_mask: bool = False,
+    regenerate_mask: bool = False,
+    sam2_model: str | None = None,
+    sam2_space: str | None = None,
+    sam2_mask_threshold: int | None = None,
 ) -> list[PipingJob]:
     ensure_dir(config.output_dir)
 
@@ -204,6 +213,26 @@ def run_pipeline(
             f"({donor_meta.width}x{donor_meta.height}, {donor_meta.mode})"
         )
         aspect_ratio = aspect_ratio_for_size(donor_meta.width, donor_meta.height)
+        mask_path = find_mask_for_product(config.masks_dir, job.product_name)
+        if regenerate_mask:
+            mask_path = None
+        if generate_mask and mask_path is None:
+            requested_model = sam2_model or config.sam2_model
+            requested_space = sam2_space or config.sam2_space
+            requested_threshold = (
+                sam2_mask_threshold
+                if sam2_mask_threshold is not None
+                else config.sam2_mask_threshold
+            )
+            mask_output = config.masks_dir / f"{job.product_name}.png"
+            print(f"[mask] generating via SAM2 ({requested_model}) -> {mask_output}")
+            mask_path = generate_mask_from_space(
+                image_path=job.donor_processed,
+                output_path=mask_output,
+                space=requested_space,
+                model=requested_model,
+                threshold=requested_threshold,
+            )
 
         print("[job]")
         print(f" product={job.product_name}")
@@ -215,6 +244,8 @@ def run_pipeline(
         print(f" model={model_id}")
         print(f" aspect_ratio={aspect_ratio}")
         print(f" results={results}")
+        if mask_path and not no_mask:
+            print(f" mask={mask_path}")
         print("[/job]")
 
         donor_model_bytes, _, donor_model_size = build_square_model_input(
@@ -234,7 +265,11 @@ def run_pipeline(
         out_dir = config.output_dir / job.product_name
         ensure_dir(out_dir)
 
-        flag_tag = _format_flag_tag(no_mask, preserve_luminance)
+        mask_image = None
+        if mask_path and not no_mask:
+            mask_image = load_mask_image(mask_path, (donor_meta.width, donor_meta.height))
+        mask_used = mask_image is not None
+        flag_tag = _format_flag_tag(no_mask, preserve_luminance, mask_used)
         existing_indices = _existing_result_indices(
             out_dir,
             job.product_name,
@@ -275,6 +310,7 @@ def run_pipeline(
                 job.donor_processed,
                 apply_mask=not no_mask,
                 preserve_luminance=preserve_luminance,
+                mask_image=mask_image,
             )
             if stats["resized"]:
                 target_w, target_h = stats["target_size"]

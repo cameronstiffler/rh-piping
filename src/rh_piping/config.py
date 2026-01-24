@@ -12,6 +12,7 @@ ASSETS_DIR = Path("assets")
 OUTPUT_DIR = Path("output")
 PROMPTS_DIR = Path("prompts")
 PROCESSED_DIR = ASSETS_DIR / "processed"
+MASKS_DIR = ASSETS_DIR / "masks"
 
 
 @dataclass
@@ -26,6 +27,10 @@ class AppConfig:
     output_dir: Path = OUTPUT_DIR
     prompts_dir: Path = PROMPTS_DIR
     processed_dir: Path = PROCESSED_DIR
+    masks_dir: Path = MASKS_DIR
+    sam2_space: str = "lightly-ai/SAMv2-Mask-Generator"
+    sam2_model: str = "tiny"
+    sam2_mask_threshold: int = 10
 
 
 def _env_flag(name: str, default: bool = False) -> bool:
@@ -66,6 +71,9 @@ def load_config() -> AppConfig:
     use_vertex = _env_flag("GOOGLE_GENAI_USE_VERTEXAI", default=True)
     project = os.getenv("GOOGLE_CLOUD_PROJECT")
     location = os.getenv("GOOGLE_CLOUD_LOCATION", "global")
+    sam2_space = os.getenv("SAM2_SPACE", "lightly-ai/SAMv2-Mask-Generator")
+    sam2_model = os.getenv("SAM2_MODEL", "tiny")
+    sam2_mask_threshold = _env_int("SAM2_MASK_THRESHOLD") or 10
 
     return AppConfig(
         model=model,
@@ -74,4 +82,7 @@ def load_config() -> AppConfig:
         use_vertex=use_vertex,
         project=project,
         location=location,
+        sam2_space=sam2_space,
+        sam2_model=sam2_model,
+        sam2_mask_threshold=sam2_mask_threshold,
     )

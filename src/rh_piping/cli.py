@@ -76,6 +76,36 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Preserve donor luminance (shadows) in the output; implies --no-mask.",
     )
+    parser.add_argument(
+        "--mask-dir",
+        type=Path,
+        help="Directory containing optional per-product mask files.",
+    )
+    parser.add_argument(
+        "--generate-mask",
+        action="store_true",
+        help="Generate a piping mask via the SAM2 space when missing.",
+    )
+    parser.add_argument(
+        "--regenerate-mask",
+        action="store_true",
+        help="Force regeneration of the piping mask even if one exists.",
+    )
+    parser.add_argument(
+        "--sam2-space",
+        type=str,
+        help="Hugging Face Space ID for SAM2 mask generation.",
+    )
+    parser.add_argument(
+        "--sam2-model",
+        type=str,
+        help="SAM2 model checkpoint (tiny, small, base_plus, large).",
+    )
+    parser.add_argument(
+        "--sam2-mask-threshold",
+        type=int,
+        help="Threshold for converting SAM2 overlay to a binary mask.",
+    )
     return parser
 
 
@@ -93,6 +123,14 @@ def main() -> None:
         config.model = args.model
     if args.temperature is not None:
         config.temperature = args.temperature
+    if args.mask_dir:
+        config.masks_dir = args.mask_dir
+    if args.sam2_space:
+        config.sam2_space = args.sam2_space
+    if args.sam2_model:
+        config.sam2_model = args.sam2_model
+    if args.sam2_mask_threshold is not None:
+        config.sam2_mask_threshold = args.sam2_mask_threshold
 
     if args.pid is not None and args.prompt is not None:
         raise SystemExit("Cannot use --pid together with --prompt.")
@@ -114,6 +152,11 @@ def main() -> None:
         limit=args.limit,
         no_mask=no_mask,
         preserve_luminance=args.preserve_luminance,
+        generate_mask=args.generate_mask,
+        regenerate_mask=args.regenerate_mask,
+        sam2_model=args.sam2_model,
+        sam2_space=args.sam2_space,
+        sam2_mask_threshold=args.sam2_mask_threshold,
     )
 
 

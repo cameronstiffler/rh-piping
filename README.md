@@ -26,6 +26,10 @@ Python tooling for piping-focused furniture edits via AI image APIs.
 
 `python -m rh_piping --pid 1`
 
+## Run in bare mode (no masking; keep size/alpha safety rails)
+
+`python -m rh_piping --pid 1 --bare`
+
 ## Run for product
 
 `python -m rh_piping --product "Provence_Sofa112in_NaturalWeave_prod34270121_F_CC"`

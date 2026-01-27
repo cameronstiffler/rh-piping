@@ -99,7 +99,10 @@ def generate_piping_image(
     prompt: str,
     donor_png: bytes,
     color_ref_png: bytes,
+    mask_png: bytes | None,
     temperature: float,
+    image_size: str | None,
+    aspect_ratio: str | None,
 ) -> bytes:
     model_id = normalize_model_id(model_name, use_vertex)
     parts = [
@@ -107,16 +110,30 @@ def generate_piping_image(
         {"text": "Donor image (replace only the piping material)."},
         image_part_from_bytes(color_ref_png),
         {"text": "Color reference for the new piping material."},
-        prompt,
     ]
+    if mask_png is not None:
+        parts.extend(
+            [
+                image_part_from_bytes(mask_png),
+                {"text": "Mask image: white = piping to change; black = keep unchanged."},
+            ]
+        )
+    parts.append(prompt)
+    config_kwargs: dict[str, object] = {
+        "temperature": temperature,
+        "response_modalities": ["TEXT", "IMAGE"],
+    }
+    image_config: dict[str, str] = {}
+    if image_size:
+        image_config["imageSize"] = image_size
+    if aspect_ratio:
+        image_config["aspectRatio"] = aspect_ratio
+    if image_config:
+        config_kwargs["image_config"] = image_config
     response = client.models.generate_content(
         model=model_id,
         contents=parts,
-        config=types.GenerateContentConfig(
-            temperature=temperature,
-            response_modalities=["TEXT", "IMAGE"],
-            image_config={"image_size": "4K"},
-        ),
+        config=types.GenerateContentConfig(**config_kwargs),
     )
     try:
         return extract_image_from_response(response)

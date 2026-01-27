@@ -77,6 +77,41 @@ def build_parser() -> argparse.ArgumentParser:
         help="Preserve donor luminance (shadows) in the output; implies --no-mask.",
     )
     parser.add_argument(
+        "--bare",
+        action="store_true",
+        help="Disable masks and post-processing; save raw model output from the API.",
+    )
+    parser.add_argument(
+        "--no-post",
+        action="store_true",
+        help="Disable all post-processing; save raw model output from the API.",
+    )
+    parser.add_argument(
+        "--fit-only",
+        action="store_true",
+        help="Fit output to donor size and alpha only; skip masks and other post steps.",
+    )
+    parser.add_argument(
+        "--raw-any-size",
+        action="store_true",
+        help="When used with --bare, accept any raw output size without retries.",
+    )
+    parser.add_argument(
+        "--retry-until-fits",
+        action="store_true",
+        help="When used with --bare, retry until the full subject fits in frame.",
+    )
+    parser.add_argument(
+        "--retry-until-scale",
+        action="store_true",
+        help="When used with --bare, retry until the subject matches donor scale.",
+    )
+    parser.add_argument(
+        "--auto-aspect-ratio",
+        action="store_true",
+        help="Pick the closest supported aspect ratio based on the donor image.",
+    )
+    parser.add_argument(
         "--mask-dir",
         type=Path,
         help="Directory containing optional per-product mask files.",
@@ -131,6 +166,8 @@ def main() -> None:
         config.sam2_model = args.sam2_model
     if args.sam2_mask_threshold is not None:
         config.sam2_mask_threshold = args.sam2_mask_threshold
+    if args.auto_aspect_ratio:
+        config.auto_aspect_ratio = True
 
     if args.pid is not None and args.prompt is not None:
         raise SystemExit("Cannot use --pid together with --prompt.")
@@ -141,7 +178,12 @@ def main() -> None:
     else:
         prompt_path, prompt_text = load_prompt(args.prompt, config.prompts_dir)
 
-    no_mask = args.no_mask or args.preserve_luminance
+    post_process = not args.no_post and not args.bare
+    fit_only = args.fit_only
+    no_mask = args.no_mask or args.preserve_luminance or args.bare
+    preserve_luminance = args.preserve_luminance and post_process
+    generate_mask = args.generate_mask and post_process
+    regenerate_mask = args.regenerate_mask and post_process
     run_pipeline(
         config,
         prompt_path=prompt_path,
@@ -151,9 +193,14 @@ def main() -> None:
         dry_run=args.dry_run,
         limit=args.limit,
         no_mask=no_mask,
-        preserve_luminance=args.preserve_luminance,
-        generate_mask=args.generate_mask,
-        regenerate_mask=args.regenerate_mask,
+        preserve_luminance=preserve_luminance,
+        post_process=post_process,
+        fit_only=fit_only,
+        enforce_raw_size=not args.raw_any_size,
+        retry_until_fits=args.retry_until_fits,
+        retry_until_scale=args.retry_until_scale,
+        generate_mask=generate_mask,
+        regenerate_mask=regenerate_mask,
         sam2_model=args.sam2_model,
         sam2_space=args.sam2_space,
         sam2_mask_threshold=args.sam2_mask_threshold,

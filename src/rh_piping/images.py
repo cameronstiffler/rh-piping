@@ -7,7 +7,7 @@ import io
 from math import gcd
 from pathlib import Path
 
-from PIL import Image, ImageChops, ImageFilter, ImageOps
+from PIL import Image, ImageChops, ImageFilter, ImageOps, ImageStat
 
 from rh_piping.io import ensure_dir
 
@@ -22,6 +22,12 @@ MIN_DIFF_THRESHOLD = 1
 MAX_MASK_COVERAGE = 0.5
 MIN_MASK_COVERAGE = 0.005
 MASK_FOLLOWS_DONOR = True
+SHADOW_SEARCH_START = 0.4
+SHADOW_SEARCH_END = 0.95
+SHADOW_MIN_BAND_PX = 4
+SHADOW_MAX_BAND_RATIO = 0.3
+SHADOW_COVERAGE_MIN = 0.7
+SHADOW_PERCENTILE = 0.1
 
 
 @dataclass
@@ -78,13 +84,235 @@ def build_square_model_input(
         square.paste(flattened, offset)
         buffer = io.BytesIO()
         square.save(buffer, format="PNG")
-    return buffer.getvalue(), target_size, square.size
+        return buffer.getvalue(), target_size, square.size
+
+
+def build_model_input(source: Path) -> tuple[bytes, tuple[int, int]]:
+    source_bytes = source.read_bytes()
+    with Image.open(io.BytesIO(source_bytes)) as source_img:
+        target_size = source_img.size
+    return source_bytes, target_size
+
+
+def build_square_mask_input(
+    mask_image: Image.Image,
+    target_size: tuple[int, int],
+    square_size: tuple[int, int],
+    background: tuple[int, int, int] = (0, 0, 0),
+) -> bytes:
+    mask = mask_image.convert("L")
+    if mask.size != target_size:
+        mask = ImageOps.fit(mask, target_size, Image.LANCZOS, centering=(0.5, 0.5))
+    mask_rgb = Image.new("RGB", target_size, background)
+    white = Image.new("RGB", target_size, (255, 255, 255))
+    mask_rgb.paste(white, mask=mask)
+    square = Image.new("RGB", square_size, background)
+    offset = (
+        (square_size[0] - target_size[0]) // 2,
+        (square_size[1] - target_size[1]) // 2,
+    )
+    square.paste(mask_rgb, offset)
+    buffer = io.BytesIO()
+    square.save(buffer, format="PNG")
+    return buffer.getvalue()
 
 
 def _preserve_donor_luminance(donor_rgb: Image.Image, output_rgb: Image.Image) -> Image.Image:
     donor_y, _, _ = donor_rgb.convert("YCbCr").split()
     _, out_cb, out_cr = output_rgb.convert("YCbCr").split()
     return Image.merge("YCbCr", (donor_y, out_cb, out_cr)).convert("RGB")
+
+
+def _find_shadow_band(
+    donor_rgb: Image.Image, alpha_channel: Image.Image
+) -> tuple[int, int] | None:
+    width, height = donor_rgb.size
+    if width == 0 or height == 0:
+        return None
+    luma = donor_rgb.convert("L")
+    luma_data = memoryview(luma.tobytes())
+    alpha_data = memoryview(alpha_channel.tobytes())
+    row_means: list[float] = []
+    row_coverage: list[float] = []
+    for y in range(height):
+        row_start = y * width
+        row_end = row_start + width
+        luma_row = luma_data[row_start:row_end]
+        alpha_row = alpha_data[row_start:row_end]
+        total = 0
+        count = 0
+        for i in range(width):
+            if alpha_row[i]:
+                total += luma_row[i]
+                count += 1
+        if count:
+            row_means.append(total / count)
+            row_coverage.append(count / width)
+        else:
+            row_means.append(255.0)
+            row_coverage.append(0.0)
+
+    start = int(height * SHADOW_SEARCH_START)
+    end = max(start + 1, int(height * SHADOW_SEARCH_END))
+    candidates = [
+        row_means[y]
+        for y in range(start, min(end, height))
+        if row_coverage[y] >= SHADOW_COVERAGE_MIN
+    ]
+    if not candidates:
+        return None
+    candidates.sort()
+    percentile_index = min(
+        len(candidates) - 1, max(0, int(len(candidates) * SHADOW_PERCENTILE))
+    )
+    threshold = candidates[percentile_index]
+
+    best_start = None
+    best_end = None
+    current_start = None
+    for y in range(start, min(end, height)):
+        qualifies = (
+            row_coverage[y] >= SHADOW_COVERAGE_MIN and row_means[y] <= threshold
+        )
+        if qualifies and current_start is None:
+            current_start = y
+        if not qualifies and current_start is not None:
+            current_end = y
+            if best_start is None or (current_end - current_start) >= (
+                best_end - best_start  # type: ignore[operator]
+            ):
+                best_start, best_end = current_start, current_end
+            current_start = None
+    if current_start is not None:
+        current_end = min(end, height)
+        if best_start is None or (current_end - current_start) >= (
+            best_end - best_start  # type: ignore[operator]
+        ):
+            best_start, best_end = current_start, current_end
+
+    if best_start is None or best_end is None:
+        return None
+    band_height = best_end - best_start
+    if band_height < SHADOW_MIN_BAND_PX:
+        return None
+    if band_height > int(height * SHADOW_MAX_BAND_RATIO):
+        return None
+    return best_start, best_end
+
+
+def _apply_shadow_band(
+    donor_rgb: Image.Image,
+    output_rgb: Image.Image,
+    band: tuple[int, int],
+) -> Image.Image:
+    start_y, end_y = band
+    if end_y <= start_y:
+        return output_rgb
+    box = (0, start_y, donor_rgb.size[0], end_y)
+    patch = donor_rgb.crop(box)
+    output_rgb.paste(patch, box)
+    return output_rgb
+
+
+def _average_corner_color(image: Image.Image) -> tuple[int, int, int]:
+    rgb = image.convert("RGB")
+    w, h = rgb.size
+    samples = [
+        rgb.getpixel((0, 0)),
+        rgb.getpixel((w - 1, 0)),
+        rgb.getpixel((0, h - 1)),
+        rgb.getpixel((w - 1, h - 1)),
+    ]
+    return (
+        sum(c[0] for c in samples) // 4,
+        sum(c[1] for c in samples) // 4,
+        sum(c[2] for c in samples) // 4,
+    )
+
+
+def _content_bbox(image: Image.Image, threshold: int = 12) -> tuple[int, int, int, int] | None:
+    bg = _average_corner_color(image)
+    bg_img = Image.new("RGB", image.size, bg)
+    diff = ImageChops.difference(image.convert("RGB"), bg_img).convert("L")
+    mask = diff.point(lambda p: 255 if p > threshold else 0)
+    return mask.getbbox()
+
+
+def _alpha_bbox(image: Image.Image) -> tuple[int, int, int, int] | None:
+    if "A" not in image.getbands():
+        return None
+    alpha = image.getchannel("A")
+    mask = alpha.point(lambda p: 255 if p > 0 else 0)
+    return mask.getbbox()
+
+
+def content_bbox_from_bytes(output_bytes: bytes) -> tuple[tuple[int, int, int, int] | None, tuple[int, int]]:
+    with Image.open(io.BytesIO(output_bytes)) as output_img:
+        output_img = ImageOps.exif_transpose(output_img)
+        bbox = _alpha_bbox(output_img)
+        if bbox is None:
+            bbox = _content_bbox(output_img)
+        return bbox, output_img.size
+
+
+def content_bbox_from_path(image_path: Path) -> tuple[tuple[int, int, int, int] | None, tuple[int, int]]:
+    with Image.open(image_path) as output_img:
+        output_img = ImageOps.exif_transpose(output_img)
+        bbox = _alpha_bbox(output_img)
+        if bbox is None:
+            bbox = _content_bbox(output_img)
+        return bbox, output_img.size
+
+
+def fit_output_to_donor(output_bytes: bytes, alpha_source: Path) -> tuple[bytes, dict]:
+    with Image.open(alpha_source) as source_img:
+        source_img = ImageOps.exif_transpose(source_img)
+        if source_img.mode != "RGBA":
+            source_img = source_img.convert("RGBA")
+        alpha_channel = source_img.getchannel("A")
+        target_size = source_img.size
+        has_alpha = alpha_channel.getextrema() != (255, 255)
+
+    with Image.open(io.BytesIO(output_bytes)) as output_img:
+        output_img = ImageOps.exif_transpose(output_img)
+        if output_img.mode != "RGB":
+            output_img = output_img.convert("RGB")
+        resized = False
+        original_size = output_img.size
+        if output_img.size != target_size:
+            target_w, target_h = target_size
+            out_w, out_h = output_img.size
+            scale = max(target_w / out_w, target_h / out_h)
+            new_w = max(1, int(round(out_w * scale)))
+            new_h = max(1, int(round(out_h * scale)))
+            if (new_w, new_h) != output_img.size:
+                output_img = output_img.resize((new_w, new_h), Image.LANCZOS)
+                resized = True
+            bbox = _content_bbox(output_img)
+            left = max(0, (output_img.size[0] - target_w) // 2)
+            top = max(0, (output_img.size[1] - target_h) // 2)
+            if bbox is not None:
+                b_left, b_top, b_right, b_bottom = bbox
+                if output_img.size[0] >= target_w:
+                    if b_right - b_left <= target_w:
+                        left = min(max(b_left - (target_w - (b_right - b_left)) // 2, 0), output_img.size[0] - target_w)
+                if output_img.size[1] >= target_h:
+                    if b_bottom - b_top <= target_h:
+                        top = min(max(b_top - (target_h - (b_bottom - b_top)) // 2, 0), output_img.size[1] - target_h)
+            output_img = output_img.crop((left, top, left + target_w, top + target_h))
+        composited = output_img.convert("RGBA")
+        composited.putalpha(alpha_channel)
+        buffer = io.BytesIO()
+        composited.save(buffer, format="PNG", icc_profile=output_img.info.get("icc_profile"))
+        stats = {
+            "has_alpha": has_alpha,
+            "resized": resized,
+            "target_size": target_size,
+            "original_size": original_size,
+        }
+        return buffer.getvalue(), stats
+
+
 
 
 def load_mask_image(mask_path: Path, target_size: tuple[int, int]) -> Image.Image:
@@ -95,6 +323,166 @@ def load_mask_image(mask_path: Path, target_size: tuple[int, int]) -> Image.Imag
         if mask_img.mode == "RGBA":
             return mask_img.getchannel("A")
         return mask_img.convert("L")
+
+
+def diff_coverage_in_mask(
+    donor_rgb: Image.Image,
+    output_rgb: Image.Image,
+    mask: Image.Image,
+    threshold: int = 10,
+) -> float:
+    if output_rgb.size != donor_rgb.size:
+        output_rgb = ImageOps.fit(output_rgb, donor_rgb.size, Image.LANCZOS, centering=(0.5, 0.5))
+    mask = mask.convert("L")
+    if mask.size != donor_rgb.size:
+        mask = ImageOps.fit(mask, donor_rgb.size, Image.LANCZOS, centering=(0.5, 0.5))
+    diff = ImageChops.difference(donor_rgb, output_rgb).convert("L")
+    diff_mask = ImageChops.multiply(diff, mask.point(lambda p: 255 if p > 0 else 0))
+    bw = diff_mask.point(lambda p: 255 if p > threshold else 0)
+    hist = bw.histogram()
+    total = sum(hist)
+    covered = total - hist[0]
+    return covered / total if total else 0.0
+
+
+def chroma_delta_in_mask(
+    donor_rgb: Image.Image,
+    output_rgb: Image.Image,
+    mask: Image.Image,
+) -> float:
+    if output_rgb.size != donor_rgb.size:
+        output_rgb = ImageOps.fit(output_rgb, donor_rgb.size, Image.LANCZOS, centering=(0.5, 0.5))
+    mask = mask.convert("L")
+    if mask.size != donor_rgb.size:
+        mask = ImageOps.fit(mask, donor_rgb.size, Image.LANCZOS, centering=(0.5, 0.5))
+    donor_ycc = donor_rgb.convert("YCbCr")
+    output_ycc = output_rgb.convert("YCbCr")
+    donor_cb, donor_cr = donor_ycc.split()[1:]
+    out_cb, out_cr = output_ycc.split()[1:]
+    diff_cb = ImageChops.difference(donor_cb, out_cb)
+    diff_cr = ImageChops.difference(donor_cr, out_cr)
+    cb_mean = ImageStat.Stat(diff_cb, mask=mask).mean[0]
+    cr_mean = ImageStat.Stat(diff_cr, mask=mask).mean[0]
+    return (cb_mean + cr_mean) / 2
+
+
+def apply_masked_chroma_transfer(
+    donor_rgb: Image.Image,
+    reference_rgb: Image.Image,
+    mask: Image.Image,
+    gain: float = 1.0,
+) -> Image.Image:
+    if reference_rgb.size != donor_rgb.size:
+        reference_rgb = ImageOps.fit(reference_rgb, donor_rgb.size, Image.LANCZOS, centering=(0.5, 0.5))
+    donor_y, _, _ = donor_rgb.convert("YCbCr").split()
+    _, ref_cb, ref_cr = reference_rgb.convert("YCbCr").split()
+    if gain != 1.0:
+        def boost(val: int) -> int:
+            shifted = 128 + (val - 128) * gain
+            return max(0, min(255, int(round(shifted))))
+        ref_cb = ref_cb.point(boost)
+        ref_cr = ref_cr.point(boost)
+    recolored = Image.merge("YCbCr", (donor_y, ref_cb, ref_cr)).convert("RGB")
+    mask = mask.convert("L")
+    if mask.size != donor_rgb.size:
+        mask = ImageOps.fit(mask, donor_rgb.size, Image.LANCZOS, centering=(0.5, 0.5))
+    return Image.composite(recolored, donor_rgb, mask)
+
+
+def _mean_chroma(reference_rgb: Image.Image) -> tuple[int, int]:
+    ycc = reference_rgb.convert("YCbCr")
+    _, cb, cr = ycc.split()
+    cb_mean = int(round(ImageStat.Stat(cb).mean[0]))
+    cr_mean = int(round(ImageStat.Stat(cr).mean[0]))
+    return cb_mean, cr_mean
+
+
+def apply_masked_swatch_color(
+    donor_rgb: Image.Image,
+    reference_rgb: Image.Image,
+    mask: Image.Image,
+    expand_px: int = 0,
+    soften_px: float = 0.0,
+    min_luma_gain: float = 0.7,
+    max_luma_gain: float = 1.0,
+) -> Image.Image:
+    if reference_rgb.size != donor_rgb.size:
+        reference_rgb = ImageOps.fit(reference_rgb, donor_rgb.size, Image.LANCZOS, centering=(0.5, 0.5))
+    donor_y = donor_rgb.convert("YCbCr").split()[0]
+    cb_mean, cr_mean = _mean_chroma(reference_rgb)
+    cb_img = Image.new("L", donor_rgb.size, cb_mean)
+    cr_img = Image.new("L", donor_rgb.size, cr_mean)
+    mask = mask.convert("L")
+    if mask.size != donor_rgb.size:
+        mask = ImageOps.fit(mask, donor_rgb.size, Image.LANCZOS, centering=(0.5, 0.5))
+    if expand_px > 0:
+        kernel = expand_px * 2 + 1
+        mask = mask.filter(ImageFilter.MaxFilter(kernel))
+    if soften_px > 0:
+        mask = mask.filter(ImageFilter.GaussianBlur(soften_px))
+    ref_y = reference_rgb.convert("YCbCr").split()[0]
+    donor_mean = ImageStat.Stat(donor_y, mask=mask).mean[0]
+    ref_mean = ImageStat.Stat(ref_y).mean[0]
+    gain = 1.0
+    if donor_mean > 0:
+        gain = ref_mean / donor_mean
+    gain = max(min_luma_gain, min(max_luma_gain, gain))
+    if gain != 1.0:
+        donor_y = donor_y.point(lambda v: max(0, min(255, int(round(v * gain)))))
+    recolored = Image.merge("YCbCr", (donor_y, cb_img, cr_img)).convert("RGB")
+    return Image.composite(recolored, donor_rgb, mask)
+
+
+def _center_square(image: Image.Image, size: int) -> Image.Image:
+    width, height = image.size
+    if size > min(width, height):
+        size = min(width, height)
+    left = (width - size) // 2
+    top = (height - size) // 2
+    return image.crop((left, top, left + size, top + size))
+
+
+def _tile_texture(texture: Image.Image, target_size: tuple[int, int]) -> Image.Image:
+    tile_w, tile_h = texture.size
+    target_w, target_h = target_size
+    tiled = Image.new("RGB", target_size)
+    for y in range(0, target_h, tile_h):
+        for x in range(0, target_w, tile_w):
+            tiled.paste(texture, (x, y))
+    return tiled
+
+
+def apply_masked_texture_transfer(
+    donor_rgb: Image.Image,
+    reference_rgb: Image.Image,
+    mask: Image.Image,
+    tile_size: int = 256,
+    texture_strength: float = 0.25,
+    chroma_gain: float = 1.4,
+) -> Image.Image:
+    if reference_rgb.size != donor_rgb.size:
+        reference_rgb = ImageOps.fit(reference_rgb, donor_rgb.size, Image.LANCZOS, centering=(0.5, 0.5))
+    ref_square = _center_square(reference_rgb, tile_size)
+    if ref_square.size != (tile_size, tile_size):
+        ref_square = ref_square.resize((tile_size, tile_size), Image.LANCZOS)
+    tiled = _tile_texture(ref_square, donor_rgb.size)
+
+    donor_y = donor_rgb.convert("YCbCr").split()[0]
+    ref_y, ref_cb, ref_cr = tiled.convert("YCbCr").split()
+    blended_y = Image.blend(donor_y, ref_y, max(0.0, min(1.0, texture_strength)))
+
+    if chroma_gain != 1.0:
+        def boost(val: int) -> int:
+            shifted = 128 + (val - 128) * chroma_gain
+            return max(0, min(255, int(round(shifted))))
+        ref_cb = ref_cb.point(boost)
+        ref_cr = ref_cr.point(boost)
+
+    recolored = Image.merge("YCbCr", (blended_y, ref_cb, ref_cr)).convert("RGB")
+    mask = mask.convert("L")
+    if mask.size != donor_rgb.size:
+        mask = ImageOps.fit(mask, donor_rgb.size, Image.LANCZOS, centering=(0.5, 0.5))
+    return Image.composite(recolored, donor_rgb, mask)
 
 
 def composite_output_with_donor(
@@ -125,6 +513,9 @@ def composite_output_with_donor(
             resized = True
         if preserve_luminance:
             output_img = _preserve_donor_luminance(donor_rgb, output_img)
+        shadow_band = _find_shadow_band(donor_rgb, alpha_channel)
+        if shadow_band is not None:
+            output_img = _apply_shadow_band(donor_rgb, output_img, shadow_band)
         if not apply_mask:
             composited = output_img.convert("RGBA")
             composited.putalpha(alpha_channel)
@@ -136,6 +527,7 @@ def composite_output_with_donor(
                 "target_size": target_size,
                 "original_size": original_size,
                 "preserve_luminance": preserve_luminance,
+                "shadow_band": shadow_band,
                 "mask_disabled": True,
                 "mask_coverage": 1.0,
                 "mask_relaxed": False,
@@ -301,6 +693,7 @@ def composite_output_with_donor(
             "target_size": target_size,
             "original_size": original_size,
             "preserve_luminance": preserve_luminance,
+            "shadow_band": shadow_band,
             "mask_coverage": coverage,
             "mask_relaxed": mask_relaxed,
             "mask_tightened": mask_tightened,

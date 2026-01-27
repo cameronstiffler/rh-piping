@@ -3,16 +3,26 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import io
 from pathlib import Path
 import re
+
+from PIL import Image, ImageOps
 
 from rh_piping.config import AppConfig
 from rh_piping.genai_client import create_client, generate_piping_image, normalize_model_id
 from rh_piping.images import (
     aspect_ratio_for_size,
-    build_square_model_input,
+    apply_masked_swatch_color,
+    build_model_input,
+    build_square_mask_input,
+    content_bbox_from_bytes,
+    content_bbox_from_path,
     composite_output_with_donor,
     convert_to_4k_png,
+    chroma_delta_in_mask,
+    diff_coverage_in_mask,
+    fit_output_to_donor,
     load_mask_image,
 )
 from rh_piping.io import ensure_dir, list_images
@@ -27,7 +37,21 @@ PROCESSED_DONOR_DIRNAME = "donor_image"
 PROCESSED_COLOR_DIRNAME = "color_reference"
 
 MAX_RESULTS = 100
+RAW_OUTPUT_MAX_ATTEMPTS = 3
+RAW_FIT_MAX_ATTEMPTS = 12
+RAW_SCALE_MAX_ATTEMPTS = 12
+RAW_SCALE_TOLERANCE = 0.03
 PROMPT_PID_VALUE = re.compile(r"PID(?P<value>-?\d+)")
+SUPPORTED_ASPECT_RATIOS = [
+    "1:1",
+    "2:3",
+    "3:2",
+    "3:4",
+    "4:3",
+    "9:16",
+    "16:9",
+    "21:9",
+]
 
 
 @dataclass
@@ -62,6 +86,86 @@ def _pid_label(prompt_id: str) -> str:
     return f"PID{value}" if value.startswith("-") else f"PID-{value}"
 
 
+def _nearest_supported_aspect_ratio(width: int, height: int) -> str:
+    if width <= 0 or height <= 0:
+        return "1:1"
+    target = width / height
+    best = SUPPORTED_ASPECT_RATIOS[0]
+    best_diff = float("inf")
+    for token in SUPPORTED_ASPECT_RATIOS:
+        num, den = token.split(":")
+        ratio = int(num) / int(den)
+        diff = abs(ratio - target)
+        if diff < best_diff:
+            best_diff = diff
+            best = token
+    return best
+
+
+def _fits_full_frame(
+    output_bytes: bytes,
+    donor_path: Path,
+    min_margin_frac: float = 0.005,
+) -> bool:
+    bbox, out_size = content_bbox_from_bytes(output_bytes)
+    if bbox is None:
+        return False
+    out_w, out_h = out_size
+    left, top, right, bottom = bbox
+    out_margins = {
+        "left": left / out_w,
+        "right": (out_w - right) / out_w,
+        "top": top / out_h,
+        "bottom": (out_h - bottom) / out_h,
+    }
+    with Image.open(donor_path) as donor_img:
+        donor_img = ImageOps.exif_transpose(donor_img)
+        donor_bbox = (
+            donor_img.getchannel("A").point(lambda p: 255 if p > 0 else 0).getbbox()
+            if "A" in donor_img.getbands()
+            else None
+        )
+        if donor_bbox is None:
+            return all(m >= min_margin_frac for m in out_margins.values())
+        d_w, d_h = donor_img.size
+        d_left, d_top, d_right, d_bottom = donor_bbox
+        donor_margins = {
+            "left": d_left / d_w,
+            "right": (d_w - d_right) / d_w,
+            "top": d_top / d_h,
+            "bottom": (d_h - d_bottom) / d_h,
+        }
+    for side in ("left", "right", "top", "bottom"):
+        required = max(min_margin_frac, donor_margins[side] * 0.5)
+        if out_margins[side] < required:
+            return False
+    return True
+
+
+def _scale_matches_donor(
+    output_bytes: bytes,
+    donor_bbox: tuple[int, int, int, int] | None,
+    tolerance: float = RAW_SCALE_TOLERANCE,
+) -> bool:
+    if donor_bbox is None:
+        return True
+    left, top, right, bottom = donor_bbox
+    donor_w = max(1, right - left)
+    donor_h = max(1, bottom - top)
+    out_bbox, _ = content_bbox_from_bytes(output_bytes)
+    if out_bbox is None:
+        return False
+    o_left, o_top, o_right, o_bottom = out_bbox
+    out_w = max(1, o_right - o_left)
+    out_h = max(1, o_bottom - o_top)
+    width_ratio = out_w / donor_w
+    height_ratio = out_h / donor_h
+    return (
+        abs(1.0 - width_ratio) <= tolerance
+        and abs(1.0 - height_ratio) <= tolerance
+    )
+
+
 def _normalize_results(requested: int) -> int:
     if requested == 3:
         return 5
@@ -78,7 +182,7 @@ def _existing_result_indices(
     if not out_dir.exists():
         return set()
     prefix = f"{product_name}_{pid_label}_MOD-{model_tag}{flag_tag}_R-"
-    pattern = re.compile(rf"^{re.escape(prefix)}(?P<index>\d+)\.png$")
+    pattern = re.compile(rf"^{re.escape(prefix)}(?P<index>\d+)\.(?:png|jpg|jpeg)$")
     indices: set[int] = set()
     for path in out_dir.iterdir():
         if not path.is_file():
@@ -97,7 +201,27 @@ def _first_free_index(indices: set[int]) -> int:
     return candidate
 
 
-def _format_flag_tag(no_mask: bool, preserve_luminance: bool, mask_used: bool) -> str:
+def _output_size_from_bytes(output_bytes: bytes) -> tuple[int, int]:
+    with Image.open(io.BytesIO(output_bytes)) as out_img:
+        out_img = ImageOps.exif_transpose(out_img)
+        return out_img.size
+
+
+def _sniff_image_extension(output_bytes: bytes) -> str:
+    if output_bytes.startswith(b"\x89PNG\r\n\x1a\n"):
+        return ".png"
+    if output_bytes.startswith(b"\xff\xd8"):
+        return ".jpg"
+    return ".png"
+
+
+def _format_flag_tag(
+    no_mask: bool,
+    preserve_luminance: bool,
+    mask_used: bool,
+    post_process: bool,
+    fit_only: bool,
+) -> str:
     flags: list[str] = []
     if no_mask:
         flags.append("nomask")
@@ -105,6 +229,10 @@ def _format_flag_tag(no_mask: bool, preserve_luminance: bool, mask_used: bool) -
         flags.append("lum")
     if mask_used:
         flags.append("mask")
+    if fit_only:
+        flags.append("fit")
+    elif not post_process:
+        flags.append("nopost")
     if not flags:
         return ""
     return f"_FX-{'-'.join(flags)}"
@@ -141,6 +269,11 @@ def run_pipeline(
     limit: int | None = None,
     no_mask: bool = False,
     preserve_luminance: bool = False,
+    post_process: bool = True,
+    fit_only: bool = False,
+    enforce_raw_size: bool = True,
+    retry_until_fits: bool = False,
+    retry_until_scale: bool = False,
     generate_mask: bool = False,
     regenerate_mask: bool = False,
     sam2_model: str | None = None,
@@ -148,6 +281,18 @@ def run_pipeline(
     sam2_mask_threshold: int | None = None,
 ) -> list[PipingJob]:
     ensure_dir(config.output_dir)
+
+    if fit_only:
+        post_process = False
+        no_mask = True
+        preserve_luminance = False
+        generate_mask = False
+        regenerate_mask = False
+    elif not post_process:
+        no_mask = True
+        preserve_luminance = False
+        generate_mask = False
+        regenerate_mask = False
 
     if results < 1 or results > MAX_RESULTS:
         raise ValueError(f"--results must be between 1 and {MAX_RESULTS}")
@@ -212,27 +357,30 @@ def run_pipeline(
             f"[convert] donor {job.donor_original.name} -> {job.donor_processed.name} "
             f"({donor_meta.width}x{donor_meta.height}, {donor_meta.mode})"
         )
+        donor_bbox, _ = content_bbox_from_path(job.donor_processed)
         aspect_ratio = aspect_ratio_for_size(donor_meta.width, donor_meta.height)
-        mask_path = find_mask_for_product(config.masks_dir, job.product_name)
-        if regenerate_mask:
-            mask_path = None
-        if generate_mask and mask_path is None:
-            requested_model = sam2_model or config.sam2_model
-            requested_space = sam2_space or config.sam2_space
-            requested_threshold = (
-                sam2_mask_threshold
-                if sam2_mask_threshold is not None
-                else config.sam2_mask_threshold
-            )
-            mask_output = config.masks_dir / f"{job.product_name}.png"
-            print(f"[mask] generating via SAM2 ({requested_model}) -> {mask_output}")
-            mask_path = generate_mask_from_space(
-                image_path=job.donor_processed,
-                output_path=mask_output,
-                space=requested_space,
-                model=requested_model,
-                threshold=requested_threshold,
-            )
+        mask_path = None
+        if post_process and not no_mask:
+            mask_path = find_mask_for_product(config.masks_dir, job.product_name)
+            if regenerate_mask:
+                mask_path = None
+            if generate_mask and mask_path is None:
+                requested_model = sam2_model or config.sam2_model
+                requested_space = sam2_space or config.sam2_space
+                requested_threshold = (
+                    sam2_mask_threshold
+                    if sam2_mask_threshold is not None
+                    else config.sam2_mask_threshold
+                )
+                mask_output = config.masks_dir / f"{job.product_name}.png"
+                print(f"[mask] generating via SAM2 ({requested_model}) -> {mask_output}")
+                mask_path = generate_mask_from_space(
+                    image_path=job.donor_processed,
+                    output_path=mask_output,
+                    space=requested_space,
+                    model=requested_model,
+                    threshold=requested_threshold,
+                )
 
         print("[job]")
         print(f" product={job.product_name}")
@@ -243,15 +391,29 @@ def run_pipeline(
         print(f" prompt_id={prompt_id}")
         print(f" model={model_id}")
         print(f" aspect_ratio={aspect_ratio}")
+        if config.auto_aspect_ratio and not config.aspect_ratio:
+            auto_ar = _nearest_supported_aspect_ratio(donor_meta.width, donor_meta.height)
+            print(f" api_aspect_ratio={auto_ar} (auto)")
+        elif config.aspect_ratio:
+            print(f" api_aspect_ratio={config.aspect_ratio}")
         print(f" results={results}")
         if mask_path and not no_mask:
             print(f" mask={mask_path}")
         print("[/job]")
 
-        donor_model_bytes, _, donor_model_size = build_square_model_input(
-            job.donor_processed
-        )
+        mask_image = None
+        if mask_path and not no_mask:
+            mask_image = load_mask_image(mask_path, (donor_meta.width, donor_meta.height))
+
+        donor_model_bytes, donor_model_size = build_model_input(job.donor_processed)
         color_bytes = selected_color_processed.read_bytes()
+        mask_bytes = None
+        if mask_image is not None:
+            mask_bytes = build_square_mask_input(
+                mask_image,
+                (donor_meta.width, donor_meta.height),
+                donor_model_size,
+            )
 
         print("[submission]")
         print(
@@ -259,17 +421,32 @@ def run_pipeline(
             f"{job.donor_processed.name} size={_file_size(job.donor_processed)} "
             f"model_input={donor_model_size[0]}x{donor_model_size[1]}"
         )
+        with Image.open(job.donor_processed) as donor_log_img:
+            donor_log_img = ImageOps.exif_transpose(donor_log_img)
+            donor_mode = donor_log_img.mode
+            donor_w, donor_h = donor_log_img.size
+            donor_has_alpha = "A" in donor_log_img.getbands()
+            donor_alpha_opaque = None
+            if donor_has_alpha:
+                donor_alpha_opaque = donor_log_img.getchannel("A").getextrema() == (
+                    255,
+                    255,
+                )
+        print(
+            " donor_props="
+            f"{donor_w}x{donor_h} mode={donor_mode} "
+            f"alpha={donor_has_alpha} alpha_opaque={donor_alpha_opaque}"
+        )
         print(f" color_file={selected_color_processed.name} size={_file_size(selected_color_processed)}")
         print("[/submission]")
 
         out_dir = config.output_dir / job.product_name
         ensure_dir(out_dir)
 
-        mask_image = None
-        if mask_path and not no_mask:
-            mask_image = load_mask_image(mask_path, (donor_meta.width, donor_meta.height))
         mask_used = mask_image is not None
-        flag_tag = _format_flag_tag(no_mask, preserve_luminance, mask_used)
+        flag_tag = _format_flag_tag(
+            no_mask, preserve_luminance, mask_used, post_process, fit_only
+        )
         existing_indices = _existing_result_indices(
             out_dir,
             job.product_name,
@@ -279,11 +456,14 @@ def run_pipeline(
         )
         result_index = _first_free_index(existing_indices)
         generated = 0
+        raw_attempts = 0
+        fit_attempts = 0
+        scale_attempts = 0
         while generated < results:
-            out_name = (
-                f"{job.product_name}_{pid_label}_MOD-{model_tag}{flag_tag}_R-{result_index}.png"
+            out_stem = (
+                f"{job.product_name}_{pid_label}_MOD-{model_tag}{flag_tag}_R-{result_index}"
             )
-            out_path = out_dir / out_name
+            out_path = out_dir / f"{out_stem}.png"
             if out_path.exists():
                 print(f" ↷ Skip R-{result_index}: {out_path.name} already exists")
                 result_index += 1
@@ -291,6 +471,12 @@ def run_pipeline(
             print(
                 f" → Request {generated + 1}/{results} for {job.product_name} (R-{result_index})"
             )
+            api_aspect_ratio = config.aspect_ratio
+            if config.auto_aspect_ratio and not api_aspect_ratio:
+                api_aspect_ratio = _nearest_supported_aspect_ratio(
+                    donor_meta.width, donor_meta.height
+                )
+
             try:
                 output_bytes = generate_piping_image(
                     client=client,
@@ -299,41 +485,181 @@ def run_pipeline(
                     prompt=prompt_text,
                     donor_png=donor_model_bytes,
                     color_ref_png=color_bytes,
+                    mask_png=mask_bytes,
                     temperature=config.temperature,
+                    image_size=config.image_size,
+                    aspect_ratio=api_aspect_ratio,
                 )
             except Exception as exc:  # pylint: disable=broad-except
                 print(f" ✖ Failed: {exc}")
                 continue
 
-            output_bytes, stats = composite_output_with_donor(
-                output_bytes,
-                job.donor_processed,
-                apply_mask=not no_mask,
-                preserve_luminance=preserve_luminance,
-                mask_image=mask_image,
-            )
-            if stats["resized"]:
-                target_w, target_h = stats["target_size"]
-                orig_w, orig_h = stats["original_size"]
-                print(
-                    " [post] fit output to donor canvas "
-                    f"{target_w}x{target_h} (original {orig_w}x{orig_h})"
+            if fit_only:
+                output_bytes, stats = fit_output_to_donor(
+                    output_bytes, job.donor_processed
                 )
-            if stats.get("preserve_luminance"):
-                print(" [post] preserved donor luminance")
-            if stats["has_alpha"]:
-                print(" [post] applied donor alpha channel to preserve transparency")
-            else:
-                print(" [post] donor alpha was fully opaque; saved output with alpha channel")
-            if stats.get("mask_disabled"):
-                print(" [post] mask disabled; kept full output with donor alpha")
-            else:
-                print(
-                    " [post] mask coverage "
-                    f"{stats['mask_coverage']:.4f} relaxed={stats['mask_relaxed']} "
-                    f"tightened={stats['mask_tightened']} clipped={stats['mask_clipped']} "
-                    f"edge_guard={stats['edge_guard_px']}px"
+                if stats["resized"]:
+                    target_w, target_h = stats["target_size"]
+                    orig_w, orig_h = stats["original_size"]
+                    print(
+                        " [post] fit output to donor canvas "
+                        f"{target_w}x{target_h} (original {orig_w}x{orig_h})"
+                    )
+                if stats["has_alpha"]:
+                    print(" [post] applied donor alpha channel to preserve transparency")
+                else:
+                    print(" [post] donor alpha was fully opaque; saved output with alpha channel")
+                print(" [post] fit-only; saved output")
+                out_path.write_bytes(output_bytes)
+                print(f" ✔ Saved -> {out_path}")
+                generated += 1
+                result_index += 1
+                continue
+
+            if not post_process:
+                out_w, out_h = _output_size_from_bytes(output_bytes)
+                if enforce_raw_size and (out_w, out_h) != (
+                    donor_meta.width,
+                    donor_meta.height,
+                ):
+                    raw_attempts += 1
+                    print(
+                        " [post] raw output size mismatch "
+                        f"{out_w}x{out_h} (donor {donor_meta.width}x{donor_meta.height}); "
+                        f"retry {raw_attempts}/{RAW_OUTPUT_MAX_ATTEMPTS}"
+                    )
+                    if raw_attempts >= RAW_OUTPUT_MAX_ATTEMPTS:
+                        raise RuntimeError(
+                            "Raw output size did not match donor after "
+                            f"{RAW_OUTPUT_MAX_ATTEMPTS} attempts."
+                        )
+                    continue
+                if retry_until_fits:
+                    if not _fits_full_frame(output_bytes, job.donor_processed):
+                        fit_attempts += 1
+                        print(
+                            " [post] raw output framing mismatch; "
+                            f"retry {fit_attempts}/{RAW_FIT_MAX_ATTEMPTS}"
+                        )
+                        if fit_attempts >= RAW_FIT_MAX_ATTEMPTS:
+                            raise RuntimeError(
+                                "Raw output did not fit full frame after "
+                                f"{RAW_FIT_MAX_ATTEMPTS} attempts."
+                            )
+                        continue
+                    fit_attempts = 0
+                if retry_until_scale:
+                    if not _scale_matches_donor(output_bytes, donor_bbox):
+                        scale_attempts += 1
+                        print(
+                            " [post] raw output scale mismatch; "
+                            f"retry {scale_attempts}/{RAW_SCALE_MAX_ATTEMPTS}"
+                        )
+                        if scale_attempts >= RAW_SCALE_MAX_ATTEMPTS:
+                            raise RuntimeError(
+                                "Raw output scale did not match donor after "
+                                f"{RAW_SCALE_MAX_ATTEMPTS} attempts."
+                            )
+                        continue
+                    scale_attempts = 0
+                raw_attempts = 0
+                ext = _sniff_image_extension(output_bytes)
+                if ext != ".png":
+                    out_path = out_dir / f"{out_stem}{ext}"
+                out_path.write_bytes(output_bytes)
+                if enforce_raw_size:
+                    print(" [post] disabled; saved raw model output (size matches donor)")
+                else:
+                    print(
+                        " [post] disabled; saved raw model output "
+                        f"({out_w}x{out_h})"
+                    )
+                print(f" ✔ Saved -> {out_path}")
+                generated += 1
+                result_index += 1
+                continue
+
+            if post_process:
+                output_bytes, stats = composite_output_with_donor(
+                    output_bytes,
+                    job.donor_processed,
+                    apply_mask=not no_mask,
+                    preserve_luminance=preserve_luminance,
+                    mask_image=mask_image,
                 )
+                if mask_image is not None:
+                    with Image.open(job.donor_processed) as donor_img:
+                        donor_img = ImageOps.exif_transpose(donor_img)
+                        donor_rgb = donor_img.convert("RGB")
+                        alpha_channel = (
+                            donor_img.getchannel("A") if "A" in donor_img.getbands() else None
+                        )
+                    with Image.open(io.BytesIO(output_bytes)) as out_img:
+                        out_img = ImageOps.exif_transpose(out_img).convert("RGB")
+                    diff_cov = diff_coverage_in_mask(donor_rgb, out_img, mask_image)
+                    chroma_delta = chroma_delta_in_mask(donor_rgb, out_img, mask_image)
+                    if diff_cov < 0.02 or chroma_delta < 6.0:
+                        with Image.open(selected_color_processed) as ref_img:
+                            ref_img = ImageOps.exif_transpose(ref_img).convert("RGB")
+                        mask_hist = mask_image.convert("L").histogram()
+                        mask_total = sum(mask_hist)
+                        mask_cov = (
+                            (mask_total - mask_hist[0]) / mask_total if mask_total else 0.0
+                        )
+                        if mask_cov < 0.01:
+                            expand_px = max(4, int(min(donor_rgb.size) * 0.006))
+                        elif mask_cov < 0.02:
+                            expand_px = max(3, int(min(donor_rgb.size) * 0.004))
+                        else:
+                            expand_px = max(2, int(min(donor_rgb.size) * 0.003))
+                        fallback = apply_masked_swatch_color(
+                            donor_rgb,
+                            ref_img,
+                            mask_image,
+                            expand_px=expand_px,
+                            soften_px=0.6,
+                            min_luma_gain=0.7,
+                            max_luma_gain=0.95,
+                        )
+                        fallback = fallback.convert("RGBA")
+                        if alpha_channel is not None:
+                            fallback.putalpha(alpha_channel)
+                        buffer = io.BytesIO()
+                        fallback.save(buffer, format="PNG")
+                        output_bytes = buffer.getvalue()
+                        print(
+                            " [post] mask change too small "
+                            f"(diff={diff_cov:.4f}, chroma={chroma_delta:.2f}); "
+                            "applied swatch color fallback"
+                        )
+                if stats["resized"]:
+                    target_w, target_h = stats["target_size"]
+                    orig_w, orig_h = stats["original_size"]
+                    print(
+                        " [post] fit output to donor canvas "
+                        f"{target_w}x{target_h} (original {orig_w}x{orig_h})"
+                    )
+                if stats.get("preserve_luminance"):
+                    print(" [post] preserved donor luminance")
+                shadow_band = stats.get("shadow_band")
+                if shadow_band:
+                    print(
+                        " [post] shadow band copied from donor rows "
+                        f"{shadow_band[0]}-{shadow_band[1]}"
+                    )
+                if stats["has_alpha"]:
+                    print(" [post] applied donor alpha channel to preserve transparency")
+                else:
+                    print(" [post] donor alpha was fully opaque; saved output with alpha channel")
+                if stats.get("mask_disabled"):
+                    print(" [post] mask disabled; kept full output with donor alpha")
+                else:
+                    print(
+                        " [post] mask coverage "
+                        f"{stats['mask_coverage']:.4f} relaxed={stats['mask_relaxed']} "
+                        f"tightened={stats['mask_tightened']} clipped={stats['mask_clipped']} "
+                        f"edge_guard={stats['edge_guard_px']}px"
+                    )
 
             out_path.write_bytes(output_bytes)
             print(f" ✔ Saved -> {out_path}")

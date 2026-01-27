@@ -23,6 +23,7 @@ from rh_piping.images import (
     chroma_delta_in_mask,
     diff_coverage_in_mask,
     fit_output_to_donor,
+    scale_output_to_donor_width,
     load_mask_image,
 )
 from rh_piping.io import ensure_dir, list_images
@@ -274,6 +275,7 @@ def run_pipeline(
     enforce_raw_size: bool = True,
     retry_until_fits: bool = False,
     retry_until_scale: bool = False,
+    scale_to_donor: bool = False,
     generate_mask: bool = False,
     regenerate_mask: bool = False,
     sam2_model: str | None = None,
@@ -359,6 +361,11 @@ def run_pipeline(
         )
         donor_bbox, _ = content_bbox_from_path(job.donor_processed)
         aspect_ratio = aspect_ratio_for_size(donor_meta.width, donor_meta.height)
+        api_aspect_ratio = config.aspect_ratio
+        if config.auto_aspect_ratio and not api_aspect_ratio:
+            api_aspect_ratio = _nearest_supported_aspect_ratio(
+                donor_meta.width, donor_meta.height
+            )
         mask_path = None
         if post_process and not no_mask:
             mask_path = find_mask_for_product(config.masks_dir, job.product_name)
@@ -391,11 +398,10 @@ def run_pipeline(
         print(f" prompt_id={prompt_id}")
         print(f" model={model_id}")
         print(f" aspect_ratio={aspect_ratio}")
-        if config.auto_aspect_ratio and not config.aspect_ratio:
-            auto_ar = _nearest_supported_aspect_ratio(donor_meta.width, donor_meta.height)
-            print(f" api_aspect_ratio={auto_ar} (auto)")
-        elif config.aspect_ratio:
-            print(f" api_aspect_ratio={config.aspect_ratio}")
+        if config.auto_aspect_ratio and not config.aspect_ratio and api_aspect_ratio:
+            print(f" api_aspect_ratio={api_aspect_ratio} (auto)")
+        elif api_aspect_ratio:
+            print(f" api_aspect_ratio={api_aspect_ratio}")
         print(f" results={results}")
         if mask_path and not no_mask:
             print(f" mask={mask_path}")
@@ -405,7 +411,9 @@ def run_pipeline(
         if mask_path and not no_mask:
             mask_image = load_mask_image(mask_path, (donor_meta.width, donor_meta.height))
 
-        donor_model_bytes, donor_model_size = build_model_input(job.donor_processed)
+        donor_model_bytes, donor_model_size = build_model_input(
+            job.donor_processed, pad_aspect_ratio=api_aspect_ratio
+        )
         color_bytes = selected_color_processed.read_bytes()
         mask_bytes = None
         if mask_image is not None:
@@ -471,12 +479,6 @@ def run_pipeline(
             print(
                 f" → Request {generated + 1}/{results} for {job.product_name} (R-{result_index})"
             )
-            api_aspect_ratio = config.aspect_ratio
-            if config.auto_aspect_ratio and not api_aspect_ratio:
-                api_aspect_ratio = _nearest_supported_aspect_ratio(
-                    donor_meta.width, donor_meta.height
-                )
-
             try:
                 output_bytes = generate_piping_image(
                     client=client,
@@ -562,6 +564,12 @@ def run_pipeline(
                             )
                         continue
                     scale_attempts = 0
+                if scale_to_donor:
+                    output_bytes, scale_stats = scale_output_to_donor_width(
+                        output_bytes, job.donor_processed
+                    )
+                    if scale_stats.get("scaled"):
+                        print(f" [post] scaled output to donor width (scale={scale_stats['scale']:.4f})")
                 raw_attempts = 0
                 ext = _sniff_image_extension(output_bytes)
                 if ext != ".png":

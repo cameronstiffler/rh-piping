@@ -107,6 +107,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="When used with --bare, retry until the subject matches donor scale.",
     )
     parser.add_argument(
+        "--scale-to-donor",
+        action="store_true",
+        help="When used with --bare, scale output to match donor subject width.",
+    )
+    parser.add_argument(
         "--auto-aspect-ratio",
         action="store_true",
         help="Pick the closest supported aspect ratio based on the donor image.",
@@ -199,6 +204,7 @@ def main() -> None:
         enforce_raw_size=not args.raw_any_size,
         retry_until_fits=args.retry_until_fits,
         retry_until_scale=args.retry_until_scale,
+        scale_to_donor=args.scale_to_donor,
         generate_mask=generate_mask,
         regenerate_mask=regenerate_mask,
         sam2_model=args.sam2_model,

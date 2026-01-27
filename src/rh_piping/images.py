@@ -87,9 +87,43 @@ def build_square_model_input(
         return buffer.getvalue(), target_size, square.size
 
 
-def build_model_input(source: Path) -> tuple[bytes, tuple[int, int]]:
+def _parse_aspect_ratio(token: str) -> float | None:
+    parts = token.split(":")
+    if len(parts) != 2:
+        return None
+    try:
+        num = float(parts[0])
+        den = float(parts[1])
+    except ValueError:
+        return None
+    if den <= 0 or num <= 0:
+        return None
+    return num / den
+
+
+def build_model_input(
+    source: Path,
+    pad_aspect_ratio: str | None = None,
+) -> tuple[bytes, tuple[int, int]]:
     source_bytes = source.read_bytes()
     with Image.open(io.BytesIO(source_bytes)) as source_img:
+        source_img = ImageOps.exif_transpose(source_img)
+        if pad_aspect_ratio:
+            ratio = _parse_aspect_ratio(pad_aspect_ratio)
+        else:
+            ratio = None
+        if ratio:
+            width, height = source_img.size
+            target_height = int((width / ratio) + 0.5)
+            if target_height > height:
+                if source_img.mode != "RGBA":
+                    source_img = source_img.convert("RGBA")
+                padded = Image.new("RGBA", (width, target_height), (0, 0, 0, 0))
+                offset_y = (target_height - height) // 2
+                padded.paste(source_img, (0, offset_y))
+                buffer = io.BytesIO()
+                padded.save(buffer, format="PNG")
+                return buffer.getvalue(), padded.size
         target_size = source_img.size
     return source_bytes, target_size
 
@@ -238,6 +272,35 @@ def _content_bbox(image: Image.Image, threshold: int = 12) -> tuple[int, int, in
     return mask.getbbox()
 
 
+def _content_bbox_downscale(
+    image: Image.Image,
+    threshold: int = 20,
+    max_width: int = 512,
+) -> tuple[int, int, int, int] | None:
+    width, height = image.size
+    if width <= 0 or height <= 0:
+        return None
+    scale = min(1.0, max_width / width)
+    if scale < 1.0:
+        small = image.resize(
+            (max(1, int(round(width * scale))), max(1, int(round(height * scale)))),
+            Image.BILINEAR,
+        )
+    else:
+        small = image
+    bbox = _content_bbox(small, threshold=threshold)
+    if bbox is None:
+        return None
+    left, top, right, bottom = bbox
+    if scale < 1.0:
+        inv = 1.0 / scale
+        left = int(round(left * inv))
+        top = int(round(top * inv))
+        right = int(round(right * inv))
+        bottom = int(round(bottom * inv))
+    return (left, top, right, bottom)
+
+
 def _alpha_bbox(image: Image.Image) -> tuple[int, int, int, int] | None:
     if "A" not in image.getbands():
         return None
@@ -260,8 +323,50 @@ def content_bbox_from_path(image_path: Path) -> tuple[tuple[int, int, int, int] 
         output_img = ImageOps.exif_transpose(output_img)
         bbox = _alpha_bbox(output_img)
         if bbox is None:
-            bbox = _content_bbox(output_img)
+            bbox = _content_bbox_downscale(output_img)
         return bbox, output_img.size
+
+
+def scale_output_to_donor_width(
+    output_bytes: bytes,
+    donor_path: Path,
+    tolerance: float = 0.02,
+) -> tuple[bytes, dict]:
+    with Image.open(donor_path) as donor_img:
+        donor_img = ImageOps.exif_transpose(donor_img)
+        donor_bbox = _alpha_bbox(donor_img)
+        if donor_bbox is None:
+            donor_bbox = _content_bbox_downscale(donor_img)
+        if donor_bbox is None:
+            return output_bytes, {"scaled": False, "reason": "donor_bbox_missing"}
+        d_left, d_top, d_right, d_bottom = donor_bbox
+        donor_width = max(1, d_right - d_left)
+
+    with Image.open(io.BytesIO(output_bytes)) as output_img:
+        output_img = ImageOps.exif_transpose(output_img)
+        if output_img.mode != "RGB":
+            output_img = output_img.convert("RGB")
+        out_bbox = _content_bbox_downscale(output_img)
+        if out_bbox is None:
+            return output_bytes, {"scaled": False, "reason": "output_bbox_missing"}
+        o_left, o_top, o_right, o_bottom = out_bbox
+        output_width = max(1, o_right - o_left)
+        scale = donor_width / output_width
+        if abs(1.0 - scale) <= tolerance:
+            return output_bytes, {"scaled": False, "scale": scale}
+        target_w = max(1, int(round(output_img.size[0] * scale)))
+        target_h = max(1, int(round(output_img.size[1] * scale)))
+        resized = output_img.resize((target_w, target_h), Image.LANCZOS)
+        background = _average_corner_color(output_img)
+        canvas = Image.new("RGB", output_img.size, background)
+        offset = (
+            max(0, (canvas.size[0] - target_w) // 2),
+            max(0, (canvas.size[1] - target_h) // 2),
+        )
+        canvas.paste(resized, offset)
+        buffer = io.BytesIO()
+        canvas.save(buffer, format="PNG")
+        return buffer.getvalue(), {"scaled": True, "scale": scale}
 
 
 def fit_output_to_donor(output_bytes: bytes, alpha_source: Path) -> tuple[bytes, dict]:

@@ -1,0 +1,1 @@
+replace pipes on donor image with pipes colored and textured to match the color reference image. Final result is exactly like the donor image in every way with the following difference: pipe colors match swatch color and placement must not change donor image.

@@ -149,6 +149,33 @@ This log captures notable work, decisions, and approach changes. Append new entr
 
 ---
 
+## 2026-01-31 (Sat)
+
+### Summary
+- Re-enabled model mask pass for edit step when using output-diff post mask.
+
+### What we did
+- Model mask used for edit input only; output-diff mask still controls post.
+- Strict donor-size enforcement applies only when output-diff is off.
+
+### Approaches and why we switched
+- You asked to hand a mask to the edit step without resizing in post.
+
+---
+
+## 2026-01-31 (Sat)
+
+### Summary
+- Added `--no-model-mask-pass` to disable model mask even if set in env/config.
+
+### What we did
+- CLI override to force model mask pass off when needed.
+
+### Approaches and why we switched
+- Needed a clean way to run without model masks (strict sizing errors).
+
+---
+
 ## Next Entry Template
 
 ### Date

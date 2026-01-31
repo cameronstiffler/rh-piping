@@ -404,6 +404,24 @@ def clip_mask_bytes_to_alpha(
     return buffer.getvalue()
 
 
+def pad_alpha_to_size(
+    alpha: Image.Image,
+    target_size: tuple[int, int],
+) -> Image.Image:
+    if alpha.size == target_size:
+        return alpha
+    src_w, src_h = alpha.size
+    tgt_w, tgt_h = target_size
+    if src_w != tgt_w or tgt_h < src_h:
+        raise ValueError(
+            f"Alpha size {alpha.size} cannot be padded to target {target_size}."
+        )
+    padded = Image.new("L", target_size, 0)
+    offset = (0, (tgt_h - src_h) // 2)
+    padded.paste(alpha, offset)
+    return padded
+
+
 def align_mask_bytes(
     mask_bytes: bytes,
     target_size: tuple[int, int],

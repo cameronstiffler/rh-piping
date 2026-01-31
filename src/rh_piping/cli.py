@@ -248,6 +248,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Generate a piping mask with the model before editing.",
     )
     parser.add_argument(
+        "--no-model-mask-pass",
+        action="store_true",
+        help="Disable model mask pass even if enabled in config/env.",
+    )
+    parser.add_argument(
         "--mask-from-output",
         action="store_true",
         help="Build the post-process mask from the model output (diff vs donor).",
@@ -434,6 +439,8 @@ def main() -> None:
         else config.vertex_bg_max_edge
     )
     model_mask_pass = args.model_mask_pass or config.model_mask_pass
+    if args.no_model_mask_pass:
+        model_mask_pass = False
     model_mask_prompt = args.model_mask_prompt or config.model_mask_prompt
     model_mask_threshold = (
         args.model_mask_threshold

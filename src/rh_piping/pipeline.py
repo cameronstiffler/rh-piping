@@ -117,6 +117,23 @@ def _pid_label(prompt_id: str) -> str:
     return f"PID{value}" if value.startswith("-") else f"PID-{value}"
 
 
+def _format_mask_prompt(
+    prompt: str,
+    mask_width: int,
+    mask_height: int,
+    donor_width: int,
+    donor_height: int,
+) -> str:
+    return (
+        prompt.replace("{{MASK_WIDTH}}", str(mask_width))
+        .replace("{{MASK_HEIGHT}}", str(mask_height))
+        .replace("{{MASK_SIZE}}", f"{mask_width}x{mask_height}")
+        .replace("{{DONOR_WIDTH}}", str(donor_width))
+        .replace("{{DONOR_HEIGHT}}", str(donor_height))
+        .replace("{{DONOR_SIZE}}", f"{donor_width}x{donor_height}")
+    )
+
+
 def _nearest_supported_aspect_ratio(width: int, height: int) -> str:
     if width <= 0 or height <= 0:
         return "1:1"
@@ -663,18 +680,39 @@ def run_pipeline(
             )
         model_mask_bytes = None
         if model_mask_pass:
-            base_mask_prompt = model_mask_prompt or (
-                "Create a binary mask image: piping = white, everything else = black."
-            )
+            if model_mask_prompt:
+                base_mask_prompt = model_mask_prompt
+            else:
+                mask_prompt_dir = config.prompts_dir / "mask_pass"
+                mask_prompt_paths: list[Path] = []
+                pid_match = PROMPT_PID_VALUE.search(prompt_id)
+                if pid_match:
+                    pid_value = pid_match.group("value").lstrip("-")
+                    mask_prompt_paths.append(
+                        mask_prompt_dir / f"mask_prompt_MID-{pid_value}.md"
+                    )
+                mask_prompt_paths.append(
+                    mask_prompt_dir / "mask_prompt_MID-3.md"
+                )
+                for mask_prompt_path in mask_prompt_paths:
+                    if mask_prompt_path.exists():
+                        base_mask_prompt = mask_prompt_path.read_text(
+                            encoding="utf-8"
+                        ).strip()
+                        break
+                else:
+                    base_mask_prompt = ""
             strict_mask_size = not mask_from_output
             if strict_mask_size:
                 target_w, target_h = donor_meta.width, donor_meta.height
             else:
                 target_w, target_h = donor_model_size
-            mask_prompt = (
-                f"{base_mask_prompt}\n"
-                "Image Dimensions: The mask must be exactly "
-                f"{target_w}x{target_h} pixels.\n"
+            mask_prompt = _format_mask_prompt(
+                base_mask_prompt,
+                mask_width=target_w,
+                mask_height=target_h,
+                donor_width=donor_meta.width,
+                donor_height=donor_meta.height,
             )
             print(" [mask] generating via model")
             if strict_mask_size:
@@ -715,6 +753,25 @@ def run_pipeline(
                         break
                     except ValueError as exc:
                         last_mask_exc = exc
+                        with Image.open(io.BytesIO(raw_mask)) as raw_mask_img:
+                            raw_mask_img = ImageOps.exif_transpose(raw_mask_img)
+                            raw_w, raw_h = raw_mask_img.size
+                        tgt_w, tgt_h = donor_mask_size
+                        raw_ratio = raw_w / raw_h if raw_h else 0.0
+                        tgt_ratio = tgt_w / tgt_h if tgt_h else 0.0
+                        ratio_delta = abs(raw_ratio - tgt_ratio)
+                        if ratio_delta <= 0.01 and attempt == MODEL_MASK_MAX_ATTEMPTS:
+                            print(
+                                " [mask] size mismatch; resizing to donor "
+                                f"({raw_w}x{raw_h} -> {tgt_w}x{tgt_h})"
+                            )
+                            mask_bytes_donor = normalize_mask_bytes(
+                                raw_mask,
+                                donor_mask_size,
+                                threshold=model_mask_threshold,
+                            )
+                            last_mask_exc = None
+                            break
                         print(
                             " [mask] size mismatch; retry "
                             f"{attempt}/{MODEL_MASK_MAX_ATTEMPTS} ({exc})"
@@ -1140,10 +1197,20 @@ def run_pipeline(
                         threshold=mask_from_output_threshold,
                         alpha=alpha_channel,
                     )
+                if no_mask:
+                    raise RuntimeError(
+                        "Post-processing requires a mask to preserve donor geometry. "
+                        "Disable --no-mask or use --no-post/--bare for raw output."
+                    )
+                if mask_image is None:
+                    raise RuntimeError(
+                        "Post-processing requires a mask image to composite pipes onto the donor. "
+                        "Provide a mask file or enable mask generation."
+                    )
                 output_bytes, stats = composite_output_with_donor(
                     output_bytes,
                     job.donor_processed,
-                    apply_mask=not no_mask and mask_image is not None,
+                    apply_mask=True,
                     preserve_luminance=preserve_luminance,
                     mask_image=mask_image,
                 )

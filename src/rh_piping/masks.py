@@ -43,6 +43,9 @@ CUSHION_SEAM_DILATE = 2
 PIPING_LUMA_PERCENT = 0.2
 PIPING_EDGE_PERCENT = 0.02
 PIPING_EDGE_DILATE = 2
+PIPING_EDGE_V2_PERCENT = 0.03
+PIPING_EDGE_V2_KEEP = 0.25
+PIPING_EDGE_V2_DILATE = 1
 SILHOUETTE_EDGE_BAND = 4
 SILHOUETTE_LUMA_PERCENT = 0.35
 SAM2_MAX_LONG_EDGE = 1024
@@ -286,6 +289,21 @@ def _piping_luma_edge_mask(
     if dilate > 0:
         candidate = candidate.filter(ImageFilter.MaxFilter(dilate * 2 + 1))
     return ImageChops.multiply(candidate, alpha)
+
+
+def _piping_edge_mask_v2(
+    donor_rgb: Image.Image,
+    alpha: Image.Image,
+) -> Image.Image:
+    low_texture = _low_texture_mask(donor_rgb, alpha, PIPING_EDGE_V2_KEEP)
+    edges = _edge_mask(donor_rgb, alpha, PIPING_EDGE_V2_PERCENT)
+    edges = ImageChops.multiply(edges, low_texture)
+    eroded = edges.filter(ImageFilter.MinFilter(3))
+    thin = ImageChops.subtract(edges, eroded)
+    dilate = max(1, PIPING_EDGE_V2_DILATE)
+    if dilate > 0:
+        thin = thin.filter(ImageFilter.MaxFilter(dilate * 2 + 1))
+    return ImageChops.multiply(thin, alpha)
 
 
 def _silhouette_edge_mask(
@@ -609,6 +627,36 @@ def _seed_candidates(
             high_tex=piping_metrics["high_texture_ratio"],
         )
     )
+    piping_v2 = _piping_edge_mask_v2(donor_rgb, alpha)
+    piping_v2_score, piping_v2_metrics = _mask_score(piping_v2, donor_rgb, alpha)
+    candidate_masks.append(
+        {
+            "label": "piping_edge_v2",
+            "mask": piping_v2,
+            "metrics": piping_v2_metrics,
+            "score": piping_v2_score,
+        }
+    )
+    if piping_v2_score > best_score:
+        best_score = piping_v2_score
+        best_mask = piping_v2
+        best_info = {
+            "threshold": threshold,
+            "edge_percent": PIPING_EDGE_V2_PERCENT,
+            "tuned": False,
+            **piping_v2_metrics,
+        }
+        best_label = "piping_edge_v2"
+    print(
+        "[mask] candidate=piping_edge_v2 score={score:.4f} coverage={coverage:.4f} "
+        "edge_overlap={edge_overlap:.3f} thin={thin:.3f} high_tex={high_tex:.3f}".format(
+            score=piping_v2_score,
+            coverage=piping_v2_metrics["coverage"],
+            edge_overlap=piping_v2_metrics["edge_overlap"],
+            thin=piping_v2_metrics["thin_ratio"],
+            high_tex=piping_v2_metrics["high_texture_ratio"],
+        )
+    )
     silhouette_mask = _silhouette_edge_mask(donor_rgb, alpha)
     silhouette_score, silhouette_metrics = _mask_score(silhouette_mask, donor_rgb, alpha)
     candidate_masks.append(
@@ -684,7 +732,7 @@ def _seed_candidates(
     if (
         silhouette_metrics["coverage"] >= MASK_MIN_COVERAGE
         and silhouette_metrics["high_texture_ratio"] < 0.2
-        and cushion_metrics["coverage"] > 0.012
+        and cushion_metrics["coverage"] > 0.02
     ):
         best_score = silhouette_score
         best_mask = silhouette_mask
@@ -749,6 +797,40 @@ def _ensure_min_coverage(
                 best_cov = alt_cov
                 break
     return best_mask, best_label, best_info, best_cov
+
+
+def _pick_piping_focus_candidate(
+    candidate_masks: list[dict[str, object]],
+) -> dict[str, object] | None:
+    priority = ("piping_edge_v2", "piping_luma_edges", "cushion_edges", "smooth_edges")
+    def _score(item: dict[str, object]) -> float:
+        metrics = item["metrics"]  # type: ignore[assignment]
+        coverage = float(metrics["coverage"])  # type: ignore[index]
+        edge_overlap = float(metrics["edge_overlap"])  # type: ignore[index]
+        thin_ratio = float(metrics["thin_ratio"])  # type: ignore[index]
+        high_tex = float(metrics["high_texture_ratio"])  # type: ignore[index]
+        score = edge_overlap * 0.5 + thin_ratio * 0.4 - high_tex * 0.3
+        if coverage < MASK_MIN_COVERAGE:
+            score *= 0.3
+        if coverage > MASK_MAX_COVERAGE:
+            score *= 0.5
+        return score
+
+    by_label: dict[str, list[dict[str, object]]] = {}
+    for item in candidate_masks:
+        label = str(item.get("label", ""))
+        by_label.setdefault(label, []).append(item)
+
+    for label in priority:
+        items = by_label.get(label, [])
+        if not items:
+            continue
+        best_item = max(items, key=_score)
+        metrics = best_item["metrics"]  # type: ignore[assignment]
+        coverage = float(metrics["coverage"])  # type: ignore[index]
+        if coverage >= MASK_MIN_COVERAGE * 0.8:
+            return best_item
+    return None
 
 
 def _resize_for_sam2(
@@ -823,6 +905,17 @@ def generate_mask_from_space(
                 alpha,
                 threshold,
             )
+            piping_pick = _pick_piping_focus_candidate(candidate_masks)
+            if piping_pick is not None:
+                best_mask = piping_pick["mask"]  # type: ignore[index]
+                best_label = str(piping_pick.get("label", best_label))
+                best_info = {
+                    "threshold": threshold,
+                    "edge_percent": 0.0,
+                    "tuned": False,
+                    **piping_pick.get("metrics", {}),  # type: ignore[arg-type]
+                }
+                print(f"[mask] prefer={best_label} reason=piping_focus")
             if best_mask is None:
                 raise RuntimeError("Failed to generate any deterministic mask candidates.")
             best_mask, best_label, best_info, best_cov = _ensure_min_coverage(

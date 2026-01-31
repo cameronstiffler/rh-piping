@@ -162,19 +162,9 @@ def generate_piping_mask(
     aspect_ratio: str | None,
 ) -> bytes:
     model_id = normalize_model_id(model_name, use_vertex)
-    parts = [
-        image_part_from_bytes(donor_png),
-        {"text": "Donor image."},
-        {
-            "text": (
-                "Return a single binary mask image only. "
-                "White (255) = piping pixels to change. "
-                "Black (0) = everything else. "
-                "No text."
-            )
-        },
-        prompt,
-    ]
+    parts = [image_part_from_bytes(donor_png)]
+    if prompt.strip():
+        parts.append({"text": prompt})
     config_kwargs: dict[str, object] = {
         "temperature": 0.0,
         "response_modalities": ["IMAGE"],

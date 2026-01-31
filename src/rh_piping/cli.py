@@ -441,7 +441,7 @@ def main() -> None:
     model_mask_pass = args.model_mask_pass or config.model_mask_pass
     if args.no_model_mask_pass:
         model_mask_pass = False
-    model_mask_prompt = args.model_mask_prompt or config.model_mask_prompt
+    model_mask_prompt = args.model_mask_prompt
     model_mask_threshold = (
         args.model_mask_threshold
         if args.model_mask_threshold is not None

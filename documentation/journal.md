@@ -176,6 +176,78 @@ This log captures notable work, decisions, and approach changes. Append new entr
 
 ---
 
+## 2026-01-31 (Sat)
+
+### Summary
+- Improved deterministic (no-SAM) piping mask selection.
+
+### What we did
+- Added a new piping-focused edge mask candidate and priority selection.
+- Reduced silhouette preference so piping candidates win more often.
+
+### Approaches and why we switched
+- The old deterministic mask was too thin/shifted; now favor piping edges.
+
+---
+
+## 2026-01-31 (Sat)
+
+### Summary
+- Post-processing now requires a mask and always composites onto the donor.
+- Model-mask prompt now explicitly constrains masks to the sofa silhouette.
+- Model-mask pass now resizes to donor size only when aspect ratios match (last-resort fallback).
+
+### What we did
+- Post step errors if no mask is present; raw output is never saved as final.
+- Updated default model-mask prompt to mention staying within the silhouette.
+- Added fallback to resize model mask to donor size when the model returns a smaller but proportional mask.
+
+### Approaches and why we switched
+- Geometry must match donor exactly, so final is now always a masked composite.
+- Model returns a smaller mask size; resizing keeps alignment while avoiding failure.
+
+---
+
+## 2026-01-31 (Sat)
+
+### Summary
+- Mask prompts can now be per-PID (MID file per PID), with MID-3 as fallback.
+
+### What we did
+- Model mask pass loads `prompts/mask_pass/mask_prompt_MID-<PID>.md` when present.
+- Added `prompts/mask_pass/mask_prompt_MID-7.md` as the current PID copy.
+
+### Approaches and why we switched
+- You want mask prompts tailored per PID; defaulting to MID-3 only wasn’t flexible enough.
+
+---
+
+## 2026-01-31 (Sat)
+
+### Summary
+- Mask pass instructions now come only from MID files (no hardcoded instruction block).
+
+### What we did
+- Removed the fixed mask instruction text from the mask API call.
+- Stopped appending dimension lines in code; MID files now include {{MASK_WIDTH}}/{{MASK_HEIGHT}} placeholders.
+- CLI no longer uses `MODEL_MASK_PROMPT` from `.env` unless explicitly passed via `--model-mask-prompt`.
+
+### Approaches and why we switched
+- You want all mask instructions centralized in the MID prompt files.
+
+---
+
+## 2026-01-31 (Sat)
+
+### Summary
+- Ran PID-7 with MID-7 mask prompt only; output saved as R14.
+
+### What we did
+- Mask pass still returned 1904x560 and was resized to 4096x1204; mask coverage ~3.16%.
+- Final output saved to `output/Provence_Sofa112in_NaturalWeave_prod34270121_F_CC/ProvenceSo1bf4_PID-7_gemini849_FM_R14.png`.
+
+---
+
 ## Next Entry Template
 
 ### Date

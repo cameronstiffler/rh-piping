@@ -379,6 +379,31 @@ def normalize_mask_bytes(
         return buffer.getvalue()
 
 
+def clip_mask_bytes_to_alpha(
+    mask_bytes: bytes,
+    alpha: Image.Image,
+    target_size: tuple[int, int],
+) -> bytes:
+    with Image.open(io.BytesIO(mask_bytes)) as mask_img:
+        mask_img = ImageOps.exif_transpose(mask_img).convert("L")
+    if mask_img.size != target_size:
+        raise ValueError(
+            f"Mask size {mask_img.size} does not match target {target_size}."
+        )
+    if alpha.size != target_size:
+        raise ValueError(
+            f"Alpha size {alpha.size} does not match target {target_size}."
+        )
+    alpha = alpha.point(lambda p: 255 if p > 0 else 0)
+    clipped = ImageChops.multiply(mask_img, alpha)
+    mask_rgb = Image.new("RGB", target_size, (0, 0, 0))
+    white = Image.new("RGB", target_size, (255, 255, 255))
+    mask_rgb.paste(white, mask=clipped)
+    buffer = io.BytesIO()
+    mask_rgb.save(buffer, format="PNG")
+    return buffer.getvalue()
+
+
 def align_mask_bytes(
     mask_bytes: bytes,
     target_size: tuple[int, int],
@@ -407,6 +432,59 @@ def align_mask_bytes(
         buffer = io.BytesIO()
         mask_rgb.save(buffer, format="PNG")
         return buffer.getvalue()
+
+
+def normalize_mask_bytes_exact(
+    mask_bytes: bytes,
+    target_size: tuple[int, int],
+    threshold: int = 200,
+) -> bytes:
+    if threshold < 0:
+        threshold = 0
+    if threshold > 255:
+        threshold = 255
+    with Image.open(io.BytesIO(mask_bytes)) as mask_img:
+        mask_img = ImageOps.exif_transpose(mask_img).convert("L")
+    if mask_img.size != target_size:
+        raise ValueError(
+            f"Mask size {mask_img.size} does not match target {target_size}."
+        )
+    mask_img = mask_img.point(lambda p: 255 if p >= threshold else 0)
+    mask_rgb = Image.new("RGB", target_size, (0, 0, 0))
+    white = Image.new("RGB", target_size, (255, 255, 255))
+    mask_rgb.paste(white, mask=mask_img)
+    buffer = io.BytesIO()
+    mask_rgb.save(buffer, format="PNG")
+    return buffer.getvalue()
+
+
+def pad_mask_bytes_to_size(
+    mask_bytes: bytes,
+    target_size: tuple[int, int],
+) -> bytes:
+    with Image.open(io.BytesIO(mask_bytes)) as mask_img:
+        mask_img = ImageOps.exif_transpose(mask_img).convert("L")
+    src_w, src_h = mask_img.size
+    tgt_w, tgt_h = target_size
+    if (src_w, src_h) != (tgt_w, tgt_h):
+        if src_w >= tgt_w and src_h >= tgt_h:
+            left = max(0, (src_w - tgt_w) // 2)
+            top = max(0, (src_h - tgt_h) // 2)
+            mask_img = mask_img.crop((left, top, left + tgt_w, top + tgt_h))
+        else:
+            padded = Image.new("L", target_size, 0)
+            offset = (
+                max(0, (tgt_w - src_w) // 2),
+                max(0, (tgt_h - src_h) // 2),
+            )
+            padded.paste(mask_img, offset)
+            mask_img = padded
+    mask_rgb = Image.new("RGB", target_size, (0, 0, 0))
+    white = Image.new("RGB", target_size, (255, 255, 255))
+    mask_rgb.paste(white, mask=mask_img)
+    buffer = io.BytesIO()
+    mask_rgb.save(buffer, format="PNG")
+    return buffer.getvalue()
 
 
 def composite_with_mask(
@@ -729,7 +807,9 @@ def load_mask_image(mask_path: Path, target_size: tuple[int, int]) -> Image.Imag
     with Image.open(mask_path) as mask_img:
         mask_img = ImageOps.exif_transpose(mask_img)
         if mask_img.size != target_size:
-            mask_img = ImageOps.fit(mask_img, target_size, Image.LANCZOS, centering=(0.5, 0.5))
+            raise ValueError(
+                f"Mask size {mask_img.size} does not match target {target_size}."
+            )
         if mask_img.mode == "RGBA":
             return mask_img.getchannel("A")
         return mask_img.convert("L")
@@ -753,6 +833,28 @@ def diff_coverage_in_mask(
     total = sum(hist)
     covered = total - hist[0]
     return covered / total if total else 0.0
+
+
+def build_output_diff_mask(
+    donor_rgb: Image.Image,
+    output_bytes: bytes,
+    threshold: int = 10,
+    alpha: Image.Image | None = None,
+) -> Image.Image:
+    with Image.open(io.BytesIO(output_bytes)) as out_img:
+        out_img = ImageOps.exif_transpose(out_img).convert("RGB")
+    if out_img.size != donor_rgb.size:
+        out_img = ImageOps.fit(out_img, donor_rgb.size, Image.LANCZOS, centering=(0.5, 0.5))
+    diff = ImageChops.difference(donor_rgb, out_img).convert("L")
+    mask = diff.point(lambda p: 255 if p > threshold else 0)
+    if alpha is not None:
+        if alpha.size != donor_rgb.size:
+            raise ValueError(
+                f"Alpha size {alpha.size} does not match donor {donor_rgb.size}."
+            )
+        alpha_bin = alpha.point(lambda p: 255 if p > 0 else 0)
+        mask = ImageChops.multiply(mask, alpha_bin)
+    return mask
 
 
 def chroma_delta_in_mask(
@@ -909,7 +1011,9 @@ def composite_output_with_donor(
         if mask.mode != "L":
             mask = mask.convert("L")
         if mask.size != target_size:
-            mask = ImageOps.fit(mask, target_size, Image.LANCZOS, centering=(0.5, 0.5))
+            raise ValueError(
+                f"Mask size {mask.size} does not match target {target_size}."
+            )
 
         alpha_binary = alpha_channel.point(lambda p: 255 if p > 0 else 0)
         mask = ImageChops.multiply(mask, alpha_binary)

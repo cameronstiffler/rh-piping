@@ -110,6 +110,19 @@ def _alpha_binary(alpha: Image.Image) -> Image.Image:
     return alpha.point(lambda p: 255 if p > 0 else 0)
 
 
+def _pad_alpha_to_size(alpha: Image.Image, target_size: tuple[int, int]) -> Image.Image:
+    if alpha.size == target_size:
+        return alpha
+    src_w, src_h = alpha.size
+    tgt_w, tgt_h = target_size
+    if src_w == tgt_w and tgt_h >= src_h:
+        padded = Image.new("L", target_size, 0)
+        offset = (0, (tgt_h - src_h) // 2)
+        padded.paste(alpha, offset)
+        return padded
+    return ImageOps.fit(alpha, target_size, Image.NEAREST, centering=(0.5, 0.5))
+
+
 def _boost_contrast(image: Image.Image) -> Image.Image:
     boosted = ImageOps.autocontrast(image, cutoff=MASK_AUTOCONTRAST_CUTOFF)
     if MASK_CONTRAST_FACTOR != 1.0:
@@ -820,6 +833,8 @@ def generate_mask_from_space(
                 mask_rgb,
                 alpha,
             )
+            alpha = _pad_alpha_to_size(alpha, best_mask.size)
+            best_mask = ImageChops.multiply(best_mask.convert("L"), alpha)
             best_mask.save(output_path, format="PNG")
             print(
                 "[mask] selected={label} score={score:.4f} coverage={coverage:.4f} "
@@ -940,7 +955,8 @@ def generate_mask_from_space(
                     mask_rgb,
                     alpha,
                 )
-
+                alpha = _pad_alpha_to_size(alpha, best_mask.size)
+                best_mask = ImageChops.multiply(best_mask.convert("L"), alpha)
                 best_mask.save(output_path, format="PNG")
                 print(
                     "[mask] selected={label} score={score:.4f} coverage={coverage:.4f} "

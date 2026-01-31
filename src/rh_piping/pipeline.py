@@ -35,13 +35,17 @@ from rh_piping.images import (
     ensure_adobe_rgb,
     ensure_dpi,
     align_mask_bytes,
+    clip_mask_bytes_to_alpha,
     composite_with_mask,
     normalize_mask_bytes,
+    normalize_mask_bytes_exact,
+    pad_mask_bytes_to_size,
     scale_output_to_donor_width,
     load_mask_image,
     parse_hex_color,
     apply_donor_alpha,
     restore_rgb_under_alpha,
+    build_output_diff_mask,
 )
 from rh_piping.io import ensure_dir, list_images
 from rh_piping.masks import find_mask_for_product, generate_mask_from_space
@@ -59,6 +63,7 @@ RAW_OUTPUT_MAX_ATTEMPTS = 3
 RAW_FIT_MAX_ATTEMPTS = 12
 RAW_SCALE_MAX_ATTEMPTS = 12
 RAW_SCALE_TOLERANCE = 0.03
+MODEL_MASK_MAX_ATTEMPTS = 3
 MAX_FAILURES = 5
 PROMPT_PID_VALUE = re.compile(r"PID(?P<value>-?\d+)")
 RECENT_DIRNAME = "recent"
@@ -413,6 +418,8 @@ def run_pipeline(
     model_mask_pass: bool = False,
     model_mask_prompt: str | None = None,
     model_mask_threshold: int = 200,
+    mask_from_output: bool = False,
+    mask_from_output_threshold: int = 10,
     generate_mask: bool = False,
     regenerate_mask: bool = False,
     sam2_model: str | None = None,
@@ -446,6 +453,9 @@ def run_pipeline(
         if vertex_bg_remove:
             print("[info] chroma key enabled; skipping Vertex background removal.")
         vertex_bg_remove = False
+    if mask_from_output and model_mask_pass:
+        print("[info] mask-from-output enabled; disabling model mask pass.")
+        model_mask_pass = False
 
     if results < 1 or results > MAX_RESULTS:
         raise ValueError(f"--results must be between 1 and {MAX_RESULTS}")
@@ -629,6 +639,12 @@ def run_pipeline(
             pad_aspect_ratio=api_aspect_ratio,
             background_color=chroma_key_color,
         )
+        with Image.open(job.donor_processed) as donor_alpha_img:
+            donor_alpha_img = ImageOps.exif_transpose(donor_alpha_img)
+            if "A" in donor_alpha_img.getbands():
+                donor_alpha = donor_alpha_img.getchannel("A")
+            else:
+                donor_alpha = Image.new("L", donor_alpha_img.size, 255)
         donor_restore_bytes = None
         if chroma_key_color and chroma_key_restore_donor:
             donor_restore_bytes, _ = build_model_input(
@@ -646,54 +662,82 @@ def run_pipeline(
             )
         model_mask_bytes = None
         if model_mask_pass:
-            mask_prompt = model_mask_prompt or (
+            base_mask_prompt = model_mask_prompt or (
                 "Create a binary mask image: piping = white, everything else = black."
             )
+            mask_prompt = (
+                f"{base_mask_prompt}\n"
+                "Image Dimensions: The mask must be exactly "
+                f"{donor_meta.width}x{donor_meta.height} pixels, "
+                "matching the donor image size.\n"
+            )
             print(" [mask] generating via model")
+            donor_mask_bytes, donor_mask_size = build_model_input(
+                job.donor_processed,
+                pad_aspect_ratio=None,
+                background_color=None,
+            )
             _write_recent_file(
                 out_dir,
                 RECENT_SUBMITTED_MASK_DIR,
                 _recent_filename("model_donor", ".png", recent_tag_base),
-                donor_model_bytes,
+                donor_mask_bytes,
             )
-            raw_mask = generate_piping_mask(
-                client=client,
-                model_name=config.model,
-                use_vertex=config.use_vertex,
-                prompt=mask_prompt,
-                donor_png=donor_model_bytes,
-                image_size=config.image_size,
-                aspect_ratio=api_aspect_ratio,
+            mask_bytes_donor = None
+            last_mask_exc: Exception | None = None
+            for attempt in range(1, MODEL_MASK_MAX_ATTEMPTS + 1):
+                raw_mask = generate_piping_mask(
+                    client=client,
+                    model_name=config.model,
+                    use_vertex=config.use_vertex,
+                    prompt=mask_prompt,
+                    donor_png=donor_mask_bytes,
+                    image_size=None,
+                    aspect_ratio=None,
+                )
+                try:
+                    mask_bytes_donor = normalize_mask_bytes_exact(
+                        raw_mask,
+                        donor_mask_size,
+                        threshold=model_mask_threshold,
+                    )
+                    last_mask_exc = None
+                    break
+                except ValueError as exc:
+                    last_mask_exc = exc
+                    print(
+                        " [mask] size mismatch; retry "
+                        f"{attempt}/{MODEL_MASK_MAX_ATTEMPTS} ({exc})"
+                    )
+            if mask_bytes_donor is None:
+                raise RuntimeError(
+                    "Model mask did not return donor-sized output."
+                ) from last_mask_exc
+            mask_bytes_donor = clip_mask_bytes_to_alpha(
+                mask_bytes_donor,
+                donor_alpha,
+                donor_mask_size,
             )
             _write_recent_file(
                 out_dir,
                 RECENT_RETURNED_MASK_DIR,
                 _recent_filename(
-                    "model_mask_raw",
-                    _sniff_image_extension(raw_mask),
+                    "model_mask",
+                    ".png",
                     recent_tag_base,
                 ),
-                raw_mask,
-            )
-            mask_bytes = normalize_mask_bytes(
-                raw_mask,
-                donor_model_size,
-                threshold=model_mask_threshold,
+                mask_bytes_donor,
             )
             out_dir = config.output_dir / job.product_name
             ensure_dir(out_dir)
             masks_dir = out_dir / "masks"
             ensure_dir(masks_dir)
             mask_out = masks_dir / f"{_short_product_tag(job.product_name)}_{pid_label}_mask.png"
-            mask_out.write_bytes(mask_bytes)
+            mask_out.write_bytes(mask_bytes_donor)
             print(f" [mask] saved -> {mask_out}")
-            model_mask_bytes = mask_bytes
-            donor_mask_bytes = align_mask_bytes(
-                model_mask_bytes,
-                (donor_meta.width, donor_meta.height),
-                threshold=model_mask_threshold,
-            )
-            with Image.open(io.BytesIO(donor_mask_bytes)) as model_mask_img:
+            model_mask_bytes = mask_bytes_donor
+            mask_bytes = pad_mask_bytes_to_size(mask_bytes_donor, donor_model_size)
+            with Image.open(io.BytesIO(model_mask_bytes)) as model_mask_img:
                 model_mask_img = ImageOps.exif_transpose(model_mask_img).convert("L")
                 mask_hist = model_mask_img.histogram()
                 mask_total = sum(mask_hist)
@@ -1048,6 +1092,19 @@ def run_pipeline(
                 continue
 
             if post_process:
+                if mask_from_output:
+                    with Image.open(job.donor_processed) as donor_img:
+                        donor_img = ImageOps.exif_transpose(donor_img)
+                        donor_rgb = donor_img.convert("RGB")
+                        alpha_channel = (
+                            donor_img.getchannel("A") if "A" in donor_img.getbands() else None
+                        )
+                    mask_image = build_output_diff_mask(
+                        donor_rgb,
+                        output_bytes,
+                        threshold=mask_from_output_threshold,
+                        alpha=alpha_channel,
+                    )
                 output_bytes, stats = composite_output_with_donor(
                     output_bytes,
                     job.donor_processed,

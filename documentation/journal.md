@@ -67,6 +67,88 @@ This log captures notable work, decisions, and approach changes. Append new entr
 
 ---
 
+## 2026-01-31 (Sat)
+
+### Summary
+- Clipped generated masks to the donor silhouette to prevent spill outside the sofa.
+
+### What we did
+- Model mask bytes are now multiplied by donor alpha before use/saving.
+- SAM2 masks are clipped to donor alpha before save.
+
+### Approaches and why we switched
+- You observed masks leaking above the donor; we now hard‑clip to silhouette.
+
+---
+
+## 2026-01-31 (Sat)
+
+### Summary
+- Enforced exact donor-size model masks (no resize/crop/pad).
+
+### What we did
+- Mask generation now uses donor-sized input and requires exact-size output.
+- Clipped mask to donor alpha after validation to prevent spill.
+
+### Approaches and why we switched
+- You saw mask height drift (too high/low); we now require exact donor-size output.
+
+---
+
+## 2026-01-31 (Sat)
+
+### Summary
+- Post now refuses to resize masks; masks must already match donor size.
+
+### What we did
+- `load_mask_image` and post composite now error on size mismatch instead of fitting.
+
+### Approaches and why we switched
+- You want the mask to align with the donor raw; no post resizing.
+
+---
+
+## 2026-01-31 (Sat)
+
+### Summary
+- Mask generation now demands exact donor-size output (with retries) via MID prompt.
+
+### What we did
+- Appended explicit donor dimensions to the mask prompt.
+- Added retry loop if the model returns the wrong mask size.
+
+### Approaches and why we switched
+- You want the MID file to dictate size and avoid any post resizing.
+
+---
+
+## 2026-01-31 (Sat)
+
+### Summary
+- Added flag to derive post mask from output diff vs donor.
+
+### What we did
+- `--mask-from-output` builds a diff mask from the generated image for post.
+- Added threshold option for tuning (`--mask-from-output-threshold`).
+
+### Approaches and why we switched
+- You want a flag-controlled fallback that avoids resizing and uses the output itself.
+
+---
+
+## 2026-01-31 (Sat)
+
+### Summary
+- `--mask-from-output` now auto-disables model mask pass to avoid size conflicts.
+
+### What we did
+- CLI/pipeline turn off model mask when output-diff mask is requested.
+
+### Approaches and why we switched
+- Model mask returns wrong dimensions; output-diff mask should run alone.
+
+---
+
 ## Next Entry Template
 
 ### Date

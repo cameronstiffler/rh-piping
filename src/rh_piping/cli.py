@@ -248,6 +248,16 @@ def build_parser() -> argparse.ArgumentParser:
         help="Generate a piping mask with the model before editing.",
     )
     parser.add_argument(
+        "--mask-from-output",
+        action="store_true",
+        help="Build the post-process mask from the model output (diff vs donor).",
+    )
+    parser.add_argument(
+        "--mask-from-output-threshold",
+        type=int,
+        help="Threshold for output-diff mask (0-255).",
+    )
+    parser.add_argument(
         "--model-mask-prompt",
         type=str,
         help="Override prompt for model-generated piping mask.",
@@ -430,6 +440,14 @@ def main() -> None:
         if args.model_mask_threshold is not None
         else config.model_mask_threshold
     )
+    mask_from_output = args.mask_from_output
+    mask_from_output_threshold = (
+        args.mask_from_output_threshold
+        if args.mask_from_output_threshold is not None
+        else 10
+    )
+    if mask_from_output:
+        model_mask_pass = False
     run_pipeline(
         config,
         prompt_path=prompt_path,
@@ -465,6 +483,8 @@ def main() -> None:
         model_mask_pass=model_mask_pass,
         model_mask_prompt=model_mask_prompt,
         model_mask_threshold=model_mask_threshold,
+        mask_from_output=mask_from_output,
+        mask_from_output_threshold=mask_from_output_threshold,
         generate_mask=generate_mask,
         regenerate_mask=regenerate_mask,
         sam2_model=args.sam2_model,

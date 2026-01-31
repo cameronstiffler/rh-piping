@@ -15,15 +15,16 @@ def pick_default_prompt(prompts_dir: Path) -> Path | None:
 
 
 def find_prompt_by_pid(pid: int, prompts_dir: Path) -> Path:
-    candidates = []
-    pid_token = f"PID{pid}"
-    candidates.extend(prompts_dir.glob(f"*{pid_token}.md"))
-    if pid >= 0:
-        alt_token = f"PID-{pid}"
-        candidates.extend(prompts_dir.glob(f"*{alt_token}.md"))
-    matches = sorted(set(candidates))
+    token = f"{pid}"
+    pattern = re.compile(rf"PID-?{re.escape(token)}(?!\\d)")
+    matches = [
+        path
+        for path in prompts_dir.glob("*.md")
+        if pattern.search(path.name)
+    ]
     if not matches:
         raise FileNotFoundError(f"No prompt matching PID{pid} in {prompts_dir}")
+    matches.sort(key=lambda p: (len(p.name), p.name))
     return matches[0]
 
 

@@ -7,7 +7,9 @@ import io
 from math import gcd
 from pathlib import Path
 
-from PIL import Image, ImageChops, ImageFilter, ImageOps, ImageStat
+import os
+
+from PIL import Image, ImageChops, ImageFilter, ImageOps, ImageStat, ImageCms
 
 from rh_piping.io import ensure_dir
 
@@ -101,9 +103,25 @@ def _parse_aspect_ratio(token: str) -> float | None:
     return num / den
 
 
+def parse_hex_color(value: str) -> tuple[int, int, int] | None:
+    raw = value.strip().lstrip("#")
+    if len(raw) == 3:
+        raw = "".join(ch * 2 for ch in raw)
+    if len(raw) != 6:
+        return None
+    try:
+        r = int(raw[0:2], 16)
+        g = int(raw[2:4], 16)
+        b = int(raw[4:6], 16)
+    except ValueError:
+        return None
+    return (r, g, b)
+
+
 def build_model_input(
     source: Path,
     pad_aspect_ratio: str | None = None,
+    background_color: tuple[int, int, int] | None = None,
 ) -> tuple[bytes, tuple[int, int]]:
     source_bytes = source.read_bytes()
     with Image.open(io.BytesIO(source_bytes)) as source_img:
@@ -116,6 +134,17 @@ def build_model_input(
             width, height = source_img.size
             target_height = int((width / ratio) + 0.5)
             if target_height > height:
+                if background_color:
+                    if source_img.mode != "RGBA":
+                        source_img = source_img.convert("RGBA")
+                    flattened = Image.new("RGB", source_img.size, background_color)
+                    flattened.paste(source_img, mask=source_img.getchannel("A"))
+                    padded = Image.new("RGB", (width, target_height), background_color)
+                    offset_y = (target_height - height) // 2
+                    padded.paste(flattened, (0, offset_y))
+                    buffer = io.BytesIO()
+                    padded.save(buffer, format="PNG")
+                    return buffer.getvalue(), padded.size
                 if source_img.mode != "RGBA":
                     source_img = source_img.convert("RGBA")
                 padded = Image.new("RGBA", (width, target_height), (0, 0, 0, 0))
@@ -124,10 +153,295 @@ def build_model_input(
                 buffer = io.BytesIO()
                 padded.save(buffer, format="PNG")
                 return buffer.getvalue(), padded.size
+        if background_color:
+            if source_img.mode != "RGBA":
+                source_img = source_img.convert("RGBA")
+            flattened = Image.new("RGB", source_img.size, background_color)
+            flattened.paste(source_img, mask=source_img.getchannel("A"))
+            buffer = io.BytesIO()
+            flattened.save(buffer, format="PNG")
+            return buffer.getvalue(), source_img.size
         target_size = source_img.size
     return source_bytes, target_size
 
 
+def apply_chroma_key(
+    image_bytes: bytes,
+    key_color: tuple[int, int, int],
+    tolerance: int = 8,
+    softness: int = 0,
+    edge_clip: int = 0,
+    mask_bytes: bytes | None = None,
+    mask_threshold: int = 1,
+    mask_expand: int = 0,
+) -> bytes:
+    if tolerance < 0:
+        tolerance = 0
+    if softness < 0:
+        softness = 0
+    if edge_clip < 0:
+        edge_clip = 0
+    if mask_threshold < 0:
+        mask_threshold = 0
+    if mask_threshold > 255:
+        mask_threshold = 255
+    if mask_expand < 0:
+        mask_expand = 0
+    kr, kg, kb = key_color
+    with Image.open(io.BytesIO(image_bytes)) as img:
+        img = ImageOps.exif_transpose(img).convert("RGBA")
+        mask_data = None
+        if mask_bytes is not None:
+            with Image.open(io.BytesIO(mask_bytes)) as mask_img:
+                mask_img = ImageOps.exif_transpose(mask_img)
+                if "A" in mask_img.getbands():
+                    mask = mask_img.getchannel("A")
+                else:
+                    mask = mask_img.convert("L")
+                if mask.size != img.size:
+                    mask = mask.resize(img.size, Image.NEAREST)
+                mask = mask.point(lambda p: 255 if p <= mask_threshold else 0)
+                if mask_expand:
+                    mask = mask.filter(ImageFilter.MaxFilter(mask_expand * 2 + 1))
+                mask_data = mask.tobytes()
+        pixels = list(img.getdata())
+        new_pixels = []
+        for idx, (r, g, b, a) in enumerate(pixels):
+            if mask_data is not None and mask_data[idx] == 0:
+                new_pixels.append((r, g, b, a))
+                continue
+            delta = max(abs(r - kr), abs(g - kg), abs(b - kb))
+            if delta <= tolerance:
+                alpha = 0
+            elif softness > 0 and delta <= tolerance + softness:
+                alpha = int(255 * (delta - tolerance) / softness)
+            else:
+                alpha = 255
+            if edge_clip and alpha <= edge_clip:
+                alpha = 0
+            if 0 < alpha < 255:
+                alpha_f = alpha / 255.0
+                r = int(round((r - kr * (1.0 - alpha_f)) / alpha_f))
+                g = int(round((g - kg * (1.0 - alpha_f)) / alpha_f))
+                b = int(round((b - kb * (1.0 - alpha_f)) / alpha_f))
+                r = max(0, min(255, r))
+                g = max(0, min(255, g))
+                b = max(0, min(255, b))
+            if a < alpha:
+                alpha = a
+            new_pixels.append((r, g, b, alpha))
+        img.putdata(new_pixels)
+        buffer = io.BytesIO()
+        img.save(buffer, format="PNG")
+        return buffer.getvalue()
+
+
+def restore_rgb_under_alpha(
+    output_bytes: bytes,
+    donor_bytes: bytes,
+    alpha_threshold: int = 254,
+) -> bytes:
+    if alpha_threshold < 0:
+        alpha_threshold = 0
+    if alpha_threshold > 255:
+        alpha_threshold = 255
+    with Image.open(io.BytesIO(output_bytes)) as out_img:
+        out_img = ImageOps.exif_transpose(out_img).convert("RGBA")
+        alpha = out_img.getchannel("A")
+        with Image.open(io.BytesIO(donor_bytes)) as donor_img:
+            donor_img = ImageOps.exif_transpose(donor_img).convert("RGB")
+            if donor_img.size != out_img.size:
+                donor_img = donor_img.resize(out_img.size, Image.LANCZOS)
+        mask = alpha.point(lambda p: 255 if p < alpha_threshold else 0)
+        out_rgb = out_img.convert("RGB")
+        composited = Image.composite(donor_img, out_rgb, mask)
+        result = composited.convert("RGBA")
+        result.putalpha(alpha)
+        buffer = io.BytesIO()
+        result.save(buffer, format="PNG")
+        return buffer.getvalue()
+
+
+def apply_donor_alpha(
+    output_bytes: bytes,
+    donor_bytes: bytes,
+) -> bytes:
+    with Image.open(io.BytesIO(output_bytes)) as out_img:
+        out_img = ImageOps.exif_transpose(out_img).convert("RGBA")
+        with Image.open(io.BytesIO(donor_bytes)) as donor_img:
+            donor_img = ImageOps.exif_transpose(donor_img)
+            if "A" not in donor_img.getbands():
+                return output_bytes
+            if donor_img.size != out_img.size:
+                donor_img = donor_img.resize(out_img.size, Image.LANCZOS)
+            alpha = donor_img.getchannel("A")
+        out_img.putalpha(alpha)
+        buffer = io.BytesIO()
+        out_img.save(buffer, format="PNG")
+        return buffer.getvalue()
+
+
+def composite_over_background(
+    output_bytes: bytes,
+    background_color: tuple[int, int, int],
+) -> bytes:
+    with Image.open(io.BytesIO(output_bytes)) as out_img:
+        out_img = ImageOps.exif_transpose(out_img).convert("RGBA")
+        bg = Image.new("RGB", out_img.size, background_color)
+        bg.paste(out_img, mask=out_img.getchannel("A"))
+        buffer = io.BytesIO()
+        bg.save(buffer, format="PNG")
+        return buffer.getvalue()
+
+
+def ensure_adobe_rgb(
+    image_path: Path,
+    adobe_icc_path: str | None,
+) -> bool:
+    if not adobe_icc_path:
+        return False
+    if not os.path.isfile(adobe_icc_path):
+        return False
+    try:
+        with Image.open(image_path) as img:
+            img = ImageOps.exif_transpose(img)
+            icc_bytes = img.info.get("icc_profile")
+            if icc_bytes:
+                try:
+                    src_profile = ImageCms.ImageCmsProfile(io.BytesIO(icc_bytes))
+                    desc = ImageCms.getProfileDescription(src_profile)
+                    if desc and "Adobe RGB" in desc:
+                        return False
+                except Exception:
+                    src_profile = ImageCms.createProfile("sRGB")
+            else:
+                src_profile = ImageCms.createProfile("sRGB")
+            dst_profile = ImageCms.ImageCmsProfile(adobe_icc_path)
+            alpha = None
+            if "A" in img.getbands():
+                alpha = img.getchannel("A")
+            rgb = img.convert("RGB")
+            converted = ImageCms.profileToProfile(
+                rgb,
+                src_profile,
+                dst_profile,
+                outputMode="RGB",
+            )
+            if alpha is not None:
+                converted = converted.convert("RGBA")
+                converted.putalpha(alpha)
+            with open(adobe_icc_path, "rb") as profile_file:
+                adobe_bytes = profile_file.read()
+            converted.save(image_path, format="PNG", icc_profile=adobe_bytes)
+            return True
+    except Exception:
+        return False
+
+
+def ensure_dpi(
+    image_path: Path,
+    target_dpi: int,
+) -> tuple[bool, tuple[float, float] | None]:
+    try:
+        with Image.open(image_path) as img:
+            img = ImageOps.exif_transpose(img)
+            icc_bytes = img.info.get("icc_profile")
+            dpi = img.info.get("dpi")
+            if dpi and len(dpi) >= 2:
+                dpi_x, dpi_y = float(dpi[0]), float(dpi[1])
+            else:
+                dpi_x = dpi_y = None
+            if dpi_x is not None and dpi_y is not None:
+                if abs(dpi_x - target_dpi) < 0.5 and abs(dpi_y - target_dpi) < 0.5:
+                    return False, (dpi_x, dpi_y)
+            fmt = img.format or "PNG"
+            save_kwargs = {"dpi": (target_dpi, target_dpi)}
+            if icc_bytes:
+                save_kwargs["icc_profile"] = icc_bytes
+            img.save(image_path, format=fmt, **save_kwargs)
+            if dpi_x is not None and dpi_y is not None:
+                return True, (dpi_x, dpi_y)
+            return True, None
+    except Exception:
+        return False, None
+
+
+def normalize_mask_bytes(
+    mask_bytes: bytes,
+    target_size: tuple[int, int],
+    threshold: int = 200,
+) -> bytes:
+    if threshold < 0:
+        threshold = 0
+    if threshold > 255:
+        threshold = 255
+    with Image.open(io.BytesIO(mask_bytes)) as mask_img:
+        mask_img = ImageOps.exif_transpose(mask_img).convert("L")
+        if mask_img.size != target_size:
+            mask_img = mask_img.resize(target_size, Image.NEAREST)
+        mask_img = mask_img.point(lambda p: 255 if p >= threshold else 0)
+        mask_rgb = Image.new("RGB", target_size, (0, 0, 0))
+        white = Image.new("RGB", target_size, (255, 255, 255))
+        mask_rgb.paste(white, mask=mask_img)
+        buffer = io.BytesIO()
+        mask_rgb.save(buffer, format="PNG")
+        return buffer.getvalue()
+
+
+def align_mask_bytes(
+    mask_bytes: bytes,
+    target_size: tuple[int, int],
+    threshold: int = 200,
+) -> bytes:
+    if threshold < 0:
+        threshold = 0
+    if threshold > 255:
+        threshold = 255
+    with Image.open(io.BytesIO(mask_bytes)) as mask_img:
+        mask_img = ImageOps.exif_transpose(mask_img).convert("L")
+        src_w, src_h = mask_img.size
+        tgt_w, tgt_h = target_size
+        if (src_w, src_h) != (tgt_w, tgt_h):
+            if src_w == tgt_w and src_h >= tgt_h:
+                top = max(0, (src_h - tgt_h) // 2)
+                mask_img = mask_img.crop((0, top, tgt_w, top + tgt_h))
+            else:
+                mask_img = ImageOps.fit(
+                    mask_img, target_size, Image.NEAREST, centering=(0.5, 0.5)
+                )
+        mask_img = mask_img.point(lambda p: 255 if p >= threshold else 0)
+        mask_rgb = Image.new("RGB", target_size, (0, 0, 0))
+        white = Image.new("RGB", target_size, (255, 255, 255))
+        mask_rgb.paste(white, mask=mask_img)
+        buffer = io.BytesIO()
+        mask_rgb.save(buffer, format="PNG")
+        return buffer.getvalue()
+
+
+def composite_with_mask(
+    output_bytes: bytes,
+    donor_path: Path,
+    mask_bytes: bytes,
+) -> bytes:
+    with Image.open(io.BytesIO(output_bytes)) as out_img:
+        out_img = ImageOps.exif_transpose(out_img).convert("RGBA")
+        out_rgb = out_img.convert("RGB")
+    with Image.open(donor_path) as donor_img:
+        donor_img = ImageOps.exif_transpose(donor_img).convert("RGBA")
+        donor_rgb = donor_img.convert("RGB")
+        donor_alpha = donor_img.getchannel("A")
+    with Image.open(io.BytesIO(mask_bytes)) as mask_img:
+        mask_img = ImageOps.exif_transpose(mask_img).convert("L")
+    if mask_img.size != donor_rgb.size:
+        mask_img = ImageOps.fit(mask_img, donor_rgb.size, Image.NEAREST, centering=(0.5, 0.5))
+    if out_rgb.size != donor_rgb.size:
+        out_rgb = ImageOps.fit(out_rgb, donor_rgb.size, Image.LANCZOS, centering=(0.5, 0.5))
+    merged = Image.composite(out_rgb, donor_rgb, mask_img)
+    merged = merged.convert("RGBA")
+    merged.putalpha(donor_alpha)
+    buffer = io.BytesIO()
+    merged.save(buffer, format="PNG")
+    return buffer.getvalue()
 def build_square_mask_input(
     mask_image: Image.Image,
     target_size: tuple[int, int],

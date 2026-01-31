@@ -17,7 +17,8 @@ High-fidelity image manipulation of the sofa in the Donor Image. Replace the col
 	•	The sofa model, shape, dimensions, frame, silhouette, legs, and cushions must remain pixel-exact to the Donor Image.
 	•	No cropping: The entire sofa must remain fully in frame, same horizontal span and alignment as the Donor Image.
 	•	No resizing: The sofa’s pixel width and height must be identical to the Donor Image.
-	•	The background, shadows, lighting conditions, and transparencies must remain unchanged.
+	•	The sofa lighting and shadows must remain unchanged.
+	•	The background must be a solid, flat white (#FFFFFF), fully opaque — no gradients, textures, or transparency.
 	•	No stylistic enhancements, re-interpretations, or structural edits are allowed.
 
 ⸻
@@ -31,8 +32,7 @@ High-fidelity image manipulation of the sofa in the Donor Image. Replace the col
 
 🎨 Technical Specifications:
 	•	Color Space: Adobe RGB (1998)
-	•	Transparency: Preserve alpha channel and all transparency data
+	•	Transparency: None. Output must be fully opaque with a solid white background (#FFFFFF).
 	•	Output Integrity: Ensure the output is a drop-in replacement for downstream use where sofa alignment and scale are critical.
 
 ⸻
-

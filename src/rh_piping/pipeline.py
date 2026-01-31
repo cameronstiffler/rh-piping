@@ -4,27 +4,47 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import io
+import hashlib
+import json
 from pathlib import Path
 import re
+import uuid
+from datetime import datetime, timezone
 
-from PIL import Image, ImageOps
+from PIL import Image, ImageOps, ImageStat
 
 from rh_piping.config import AppConfig
-from rh_piping.genai_client import create_client, generate_piping_image, normalize_model_id
+from rh_piping.genai_client import (
+    create_client,
+    generate_piping_image,
+    generate_piping_mask,
+    normalize_model_id,
+    remove_background_vertex,
+)
 from rh_piping.images import (
     aspect_ratio_for_size,
+    apply_chroma_key,
     apply_masked_swatch_color,
     build_model_input,
     build_square_mask_input,
     content_bbox_from_bytes,
     content_bbox_from_path,
     composite_output_with_donor,
+    composite_over_background,
     convert_to_4k_png,
     chroma_delta_in_mask,
     diff_coverage_in_mask,
     fit_output_to_donor,
+    ensure_adobe_rgb,
+    ensure_dpi,
+    align_mask_bytes,
+    composite_with_mask,
+    normalize_mask_bytes,
     scale_output_to_donor_width,
     load_mask_image,
+    parse_hex_color,
+    apply_donor_alpha,
+    restore_rgb_under_alpha,
 )
 from rh_piping.io import ensure_dir, list_images
 from rh_piping.masks import find_mask_for_product, generate_mask_from_space
@@ -42,7 +62,14 @@ RAW_OUTPUT_MAX_ATTEMPTS = 3
 RAW_FIT_MAX_ATTEMPTS = 12
 RAW_SCALE_MAX_ATTEMPTS = 12
 RAW_SCALE_TOLERANCE = 0.03
+MAX_FAILURES = 5
 PROMPT_PID_VALUE = re.compile(r"PID(?P<value>-?\d+)")
+RECENT_DIRNAME = "recent"
+RECENT_SUBMITTED_EDIT_DIR = "submitted/edit"
+RECENT_SUBMITTED_MASK_DIR = "submitted/mask"
+RECENT_RETURNED_MASK_DIR = "returned/mask"
+RECENT_RETURNED_RESULT_DIR = "returned/result"
+RECENT_RETURNED_POST_DIR = "returned/post"
 SUPPORTED_ASPECT_RATIOS = [
     "1:1",
     "2:3",
@@ -175,15 +202,11 @@ def _normalize_results(requested: int) -> int:
 
 def _existing_result_indices(
     out_dir: Path,
-    product_name: str,
-    pid_label: str,
-    model_tag: str,
-    flag_tag: str,
+    stem_prefix: str,
 ) -> set[int]:
     if not out_dir.exists():
         return set()
-    prefix = f"{product_name}_{pid_label}_MOD-{model_tag}{flag_tag}_R-"
-    pattern = re.compile(rf"^{re.escape(prefix)}(?P<index>\d+)\.(?:png|jpg|jpeg)$")
+    pattern = re.compile(rf"^{re.escape(stem_prefix)}(?P<index>\d+)\.(?:png|jpg|jpeg)$")
     indices: set[int] = set()
     for path in out_dir.iterdir():
         if not path.is_file():
@@ -222,6 +245,7 @@ def _format_flag_tag(
     mask_used: bool,
     post_process: bool,
     fit_only: bool,
+    chroma_key: bool,
 ) -> str:
     flags: list[str] = []
     if no_mask:
@@ -230,6 +254,8 @@ def _format_flag_tag(
         flags.append("lum")
     if mask_used:
         flags.append("mask")
+    if chroma_key:
+        flags.append("ckey")
     if fit_only:
         flags.append("fit")
     elif not post_process:
@@ -239,8 +265,103 @@ def _format_flag_tag(
     return f"_FX-{'-'.join(flags)}"
 
 
+def _short_product_tag(product_name: str, length: int = 10) -> str:
+    cleaned = re.sub(r"[^A-Za-z0-9]+", "", product_name)
+    if not cleaned:
+        cleaned = "prod"
+    digest = hashlib.sha1(product_name.encode("utf-8")).hexdigest()[:4]
+    return f"{cleaned[:length]}{digest}"
+
+
+def _short_model_tag(model_tag: str, length: int = 6) -> str:
+    cleaned = re.sub(r"[^A-Za-z0-9]+", "", model_tag)
+    if not cleaned:
+        cleaned = "model"
+    digest = hashlib.sha1(model_tag.encode("utf-8")).hexdigest()[:3]
+    return f"{cleaned[:length]}{digest}"
+
+
+def _format_flag_tag_short(
+    no_mask: bool,
+    preserve_luminance: bool,
+    mask_used: bool,
+    post_process: bool,
+    fit_only: bool,
+    chroma_key: bool,
+    vertex_bg_remove: bool,
+) -> str:
+    flags: list[str] = []
+    if no_mask:
+        flags.append("N")
+    if preserve_luminance:
+        flags.append("L")
+    if mask_used:
+        flags.append("M")
+    if chroma_key:
+        flags.append("K")
+    if vertex_bg_remove:
+        flags.append("B")
+    if fit_only:
+        flags.append("F")
+    elif not post_process:
+        flags.append("P")
+    if not flags:
+        return ""
+    return f"_F{''.join(flags)}"
+
+
 def _match_product(donor: Path, product_name: str) -> bool:
     return donor.stem == product_name or donor.name == product_name
+
+
+def _write_recent_file(
+    root_dir: Path,
+    bucket: str,
+    filename: str,
+    data: bytes,
+) -> Path:
+    dest_dir = root_dir / RECENT_DIRNAME / bucket
+    ensure_dir(dest_dir)
+    dest_path = dest_dir / filename
+    dest_path.write_bytes(data)
+    return dest_path
+
+
+def _write_recent_json(
+    root_dir: Path,
+    filename: str,
+    payload: dict[str, object],
+) -> Path:
+    dest_dir = root_dir / RECENT_DIRNAME
+    ensure_dir(dest_dir)
+    dest_path = dest_dir / filename
+    dest_path.write_text(json.dumps(payload, indent=2, sort_keys=True))
+    return dest_path
+
+
+def _utc_iso_now() -> str:
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+
+
+def _utc_run_stamp() -> str:
+    return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+
+
+def _recent_tag(
+    pid_label: str,
+    model_tag: str,
+    run_stamp: str,
+    run_id: str,
+    result_index: int | None = None,
+) -> str:
+    parts = [pid_label, model_tag, run_stamp, f"run{run_id[:8]}"]
+    if result_index is not None:
+        parts.append(f"R{result_index}")
+    return "_".join(parts)
+
+
+def _recent_filename(base: str, ext: str, tag: str) -> str:
+    return f"{base}_{tag}{ext}"
 
 
 def build_jobs(assets_dir: Path, processed_dir: Path, product: str | None) -> list[PipingJob]:
@@ -276,6 +397,25 @@ def run_pipeline(
     retry_until_fits: bool = False,
     retry_until_scale: bool = False,
     scale_to_donor: bool = False,
+    chroma_key_hex: str | None = None,
+    chroma_key_tolerance: int = 8,
+    chroma_key_softness: int = 0,
+    chroma_key_edge_clip: int = 0,
+    chroma_key_restore_donor: bool = False,
+    chroma_key_restore_threshold: int = 254,
+    chroma_key_mask_donor: bool = True,
+    chroma_key_mask_threshold: int = 8,
+    chroma_key_mask_expand: int = 2,
+    vertex_bg_remove: bool = False,
+    vertex_bg_model: str | None = None,
+    vertex_bg_prompt: str | None = None,
+    vertex_bg_output_mime: str | None = None,
+    vertex_bg_location: str | None = None,
+    vertex_bg_max_bytes: int | None = None,
+    vertex_bg_max_edge: int | None = None,
+    model_mask_pass: bool = False,
+    model_mask_prompt: str | None = None,
+    model_mask_threshold: int = 200,
     generate_mask: bool = False,
     regenerate_mask: bool = False,
     sam2_model: str | None = None,
@@ -283,6 +423,9 @@ def run_pipeline(
     sam2_mask_threshold: int | None = None,
 ) -> list[PipingJob]:
     ensure_dir(config.output_dir)
+    run_id = uuid.uuid4().hex
+    run_started = _utc_iso_now()
+    run_stamp = _utc_run_stamp()
 
     if fit_only:
         post_process = False
@@ -295,6 +438,29 @@ def run_pipeline(
         preserve_luminance = False
         generate_mask = False
         regenerate_mask = False
+    needs_mask_for_fallback = config.force_swatch_fallback
+    if config.force_swatch_fallback:
+        if post_process:
+            print("[info] force swatch fallback enabled; disabling composite post-processing.")
+        post_process = False
+        no_mask = True
+        preserve_luminance = False
+        generate_mask = False
+        regenerate_mask = False
+        if vertex_bg_remove:
+            print("[info] force swatch fallback enabled; skipping Vertex background removal.")
+        vertex_bg_remove = False
+    if chroma_key_hex:
+        if post_process:
+            print("[info] chroma key enabled; disabling composite post-processing.")
+        post_process = False
+        no_mask = True
+        preserve_luminance = False
+        generate_mask = False
+        regenerate_mask = False
+        if vertex_bg_remove:
+            print("[info] chroma key enabled; skipping Vertex background removal.")
+        vertex_bg_remove = False
 
     if results < 1 or results > MAX_RESULTS:
         raise ValueError(f"--results must be between 1 and {MAX_RESULTS}")
@@ -318,6 +484,30 @@ def run_pipeline(
     pid_label = _pid_label(prompt_id)
     model_id = normalize_model_id(config.model, config.use_vertex)
     model_tag = _sanitize_model_tag(model_id)
+    model_tag_short = _short_model_tag(model_tag)
+    if config.force_swatch_fallback:
+        chroma_key_hex = None
+    chroma_key_color = None
+    chroma_key_label = None
+    if chroma_key_hex:
+        chroma_key_color = parse_hex_color(chroma_key_hex)
+        if chroma_key_color is None:
+            raise ValueError(f"Invalid chroma key color: {chroma_key_hex}")
+        if chroma_key_hex.startswith("#"):
+            chroma_key_label = chroma_key_hex
+        else:
+            chroma_key_label = f"#{chroma_key_hex}"
+        prompt_text = (
+            f"{prompt_text.rstrip()}\n"
+            "Background Requirement: The background outside the sofa is a solid, "
+            f"flat color {chroma_key_label} (RGB {chroma_key_color[0]}, "
+            f"{chroma_key_color[1]}, {chroma_key_color[2]}).\n"
+        )
+    preview_bg_color = None
+    if config.preview_bg_hex:
+        preview_bg_color = parse_hex_color(config.preview_bg_hex)
+        if preview_bg_color is None:
+            raise ValueError(f"Invalid preview background color: {config.preview_bg_hex}")
 
     if dry_run:
         print(f"Discovered {len(jobs)} job(s).")
@@ -359,6 +549,7 @@ def run_pipeline(
             f"[convert] donor {job.donor_original.name} -> {job.donor_processed.name} "
             f"({donor_meta.width}x{donor_meta.height}, {donor_meta.mode})"
         )
+        out_dir = config.output_dir / job.product_name
         donor_bbox, _ = content_bbox_from_path(job.donor_processed)
         aspect_ratio = aspect_ratio_for_size(donor_meta.width, donor_meta.height)
         api_aspect_ratio = config.aspect_ratio
@@ -366,8 +557,34 @@ def run_pipeline(
             api_aspect_ratio = _nearest_supported_aspect_ratio(
                 donor_meta.width, donor_meta.height
             )
+        recent_tag_base = _recent_tag(
+            pid_label,
+            model_tag_short,
+            run_stamp,
+            run_id,
+        )
+        _write_recent_json(
+            out_dir,
+            "run.json",
+            {
+                "run_id": run_id,
+                "run_stamp_utc": run_stamp,
+                "run_started_utc": run_started,
+                "product": job.product_name,
+                "prompt_id": prompt_id,
+                "model": model_id,
+                "model_tag": model_tag_short,
+                "use_vertex": config.use_vertex,
+                "api_aspect_ratio": api_aspect_ratio,
+                "requested_results": requested_results,
+                "results_per_donor": results,
+                "model_mask_pass": model_mask_pass,
+                "sam2_space": sam2_space or config.sam2_space,
+                "sam2_model": sam2_model or config.sam2_model,
+            },
+        )
         mask_path = None
-        if post_process and not no_mask:
+        if (post_process and not no_mask) or needs_mask_for_fallback:
             mask_path = find_mask_for_product(config.masks_dir, job.product_name)
             if regenerate_mask:
                 mask_path = None
@@ -381,6 +598,12 @@ def run_pipeline(
                 )
                 mask_output = config.masks_dir / f"{job.product_name}.png"
                 print(f"[mask] generating via SAM2 ({requested_model}) -> {mask_output}")
+                _write_recent_file(
+                    out_dir,
+                    RECENT_SUBMITTED_MASK_DIR,
+                    _recent_filename("sam2_donor", ".png", recent_tag_base),
+                    job.donor_processed.read_bytes(),
+                )
                 mask_path = generate_mask_from_space(
                     image_path=job.donor_processed,
                     output_path=mask_output,
@@ -388,6 +611,13 @@ def run_pipeline(
                     model=requested_model,
                     threshold=requested_threshold,
                 )
+                if mask_path.exists():
+                    _write_recent_file(
+                        out_dir,
+                        RECENT_RETURNED_MASK_DIR,
+                        _recent_filename("sam2_mask", ".png", recent_tag_base),
+                        mask_path.read_bytes(),
+                    )
 
         print("[job]")
         print(f" product={job.product_name}")
@@ -403,17 +633,56 @@ def run_pipeline(
         elif api_aspect_ratio:
             print(f" api_aspect_ratio={api_aspect_ratio}")
         print(f" results={results}")
-        if mask_path and not no_mask:
+        if mask_path and (not no_mask or needs_mask_for_fallback):
             print(f" mask={mask_path}")
         print("[/job]")
 
         mask_image = None
-        if mask_path and not no_mask:
+        if mask_path and (not no_mask or needs_mask_for_fallback):
             mask_image = load_mask_image(mask_path, (donor_meta.width, donor_meta.height))
 
+        force_output_bytes = None
+        if config.force_swatch_fallback:
+            if mask_image is None:
+                raise RuntimeError("Force swatch fallback requires a valid mask image.")
+            with Image.open(job.donor_processed) as donor_img:
+                donor_img = ImageOps.exif_transpose(donor_img)
+                donor_rgb = donor_img.convert("RGB")
+                donor_alpha = donor_img.getchannel("A") if "A" in donor_img.getbands() else None
+            with Image.open(selected_color_processed) as ref_img:
+                ref_img = ImageOps.exif_transpose(ref_img).convert("RGB")
+                ref_small = ref_img.resize((64, 64), Image.LANCZOS)
+                avg = ImageStat.Stat(ref_small).mean[:3]
+                avg_color = tuple(int(round(c)) for c in avg)
+            solid_ref = Image.new("RGB", donor_rgb.size, avg_color)
+            fallback = apply_masked_swatch_color(
+                donor_rgb,
+                solid_ref,
+                mask_image,
+                expand_px=2,
+                soften_px=0.6,
+                min_luma_gain=0.7,
+                max_luma_gain=0.95,
+            )
+            fallback = fallback.convert("RGBA")
+            if donor_alpha is not None:
+                fallback.putalpha(donor_alpha)
+            buffer = io.BytesIO()
+            fallback.save(buffer, format="PNG")
+            force_output_bytes = buffer.getvalue()
+
         donor_model_bytes, donor_model_size = build_model_input(
-            job.donor_processed, pad_aspect_ratio=api_aspect_ratio
+            job.donor_processed,
+            pad_aspect_ratio=api_aspect_ratio,
+            background_color=chroma_key_color,
         )
+        donor_restore_bytes = None
+        if chroma_key_color and chroma_key_restore_donor:
+            donor_restore_bytes, _ = build_model_input(
+                job.donor_processed,
+                pad_aspect_ratio=api_aspect_ratio,
+                background_color=None,
+            )
         color_bytes = selected_color_processed.read_bytes()
         mask_bytes = None
         if mask_image is not None:
@@ -422,6 +691,71 @@ def run_pipeline(
                 (donor_meta.width, donor_meta.height),
                 donor_model_size,
             )
+        model_mask_bytes = None
+        if model_mask_pass:
+            mask_prompt = model_mask_prompt or (
+                "Create a binary mask image: piping = white, everything else = black."
+            )
+            print(" [mask] generating via model")
+            _write_recent_file(
+                out_dir,
+                RECENT_SUBMITTED_MASK_DIR,
+                _recent_filename("model_donor", ".png", recent_tag_base),
+                donor_model_bytes,
+            )
+            raw_mask = generate_piping_mask(
+                client=client,
+                model_name=config.model,
+                use_vertex=config.use_vertex,
+                prompt=mask_prompt,
+                donor_png=donor_model_bytes,
+                image_size=config.image_size,
+                aspect_ratio=api_aspect_ratio,
+            )
+            _write_recent_file(
+                out_dir,
+                RECENT_RETURNED_MASK_DIR,
+                _recent_filename(
+                    "model_mask_raw",
+                    _sniff_image_extension(raw_mask),
+                    recent_tag_base,
+                ),
+                raw_mask,
+            )
+            mask_bytes = normalize_mask_bytes(
+                raw_mask,
+                donor_model_size,
+                threshold=model_mask_threshold,
+            )
+            out_dir = config.output_dir / job.product_name
+            ensure_dir(out_dir)
+            masks_dir = out_dir / "masks"
+            ensure_dir(masks_dir)
+            mask_out = masks_dir / f"{_short_product_tag(job.product_name)}_{pid_label}_mask.png"
+            mask_out.write_bytes(mask_bytes)
+            print(f" [mask] saved -> {mask_out}")
+            model_mask_bytes = mask_bytes
+            donor_mask_bytes = align_mask_bytes(
+                model_mask_bytes,
+                (donor_meta.width, donor_meta.height),
+                threshold=model_mask_threshold,
+            )
+            with Image.open(io.BytesIO(donor_mask_bytes)) as model_mask_img:
+                model_mask_img = ImageOps.exif_transpose(model_mask_img).convert("L")
+                mask_hist = model_mask_img.histogram()
+                mask_total = sum(mask_hist)
+                mask_cov = (
+                    (mask_total - mask_hist[0]) / mask_total if mask_total else 0.0
+                )
+                if mask_cov > 0.0005:
+                    mask_image = model_mask_img.copy()
+                    print(
+                        f" [mask] model mask coverage {mask_cov:.4f}; using for post-process"
+                    )
+                else:
+                    print(
+                        f" [mask] model mask coverage {mask_cov:.4f}; keeping existing mask"
+                    )
 
         print("[submission]")
         print(
@@ -446,54 +780,126 @@ def run_pipeline(
             f"alpha={donor_has_alpha} alpha_opaque={donor_alpha_opaque}"
         )
         print(f" color_file={selected_color_processed.name} size={_file_size(selected_color_processed)}")
+        if chroma_key_color:
+            print(
+                " chroma_key="
+                f"{chroma_key_label} tolerance={chroma_key_tolerance} "
+                f"softness={chroma_key_softness} edge_clip={chroma_key_edge_clip} "
+                f"restore_donor={chroma_key_restore_donor} "
+                f"restore_thr={chroma_key_restore_threshold} "
+                f"mask_donor={chroma_key_mask_donor} "
+                f"mask_thr={chroma_key_mask_threshold} "
+                f"mask_expand={chroma_key_mask_expand}"
+            )
         print("[/submission]")
 
-        out_dir = config.output_dir / job.product_name
         ensure_dir(out_dir)
 
         mask_used = mask_image is not None
-        flag_tag = _format_flag_tag(
-            no_mask, preserve_luminance, mask_used, post_process, fit_only
+        flag_tag = _format_flag_tag_short(
+            no_mask,
+            preserve_luminance,
+            mask_used,
+            post_process,
+            fit_only,
+            bool(chroma_key_color),
+            vertex_bg_remove,
         )
-        existing_indices = _existing_result_indices(
-            out_dir,
-            job.product_name,
-            pid_label,
-            model_tag,
-            flag_tag,
-        )
+        product_tag = _short_product_tag(job.product_name)
+        stem_prefix = f"{product_tag}_{pid_label}_{model_tag_short}{flag_tag}_R"
+        existing_indices = _existing_result_indices(out_dir, stem_prefix)
         result_index = _first_free_index(existing_indices)
         generated = 0
+        failures = 0
         raw_attempts = 0
         fit_attempts = 0
         scale_attempts = 0
         while generated < results:
-            out_stem = (
-                f"{job.product_name}_{pid_label}_MOD-{model_tag}{flag_tag}_R-{result_index}"
-            )
+            out_stem = f"{stem_prefix}{result_index}"
             out_path = out_dir / f"{out_stem}.png"
             if out_path.exists():
                 print(f" ↷ Skip R-{result_index}: {out_path.name} already exists")
                 result_index += 1
                 continue
+            recent_tag_result = _recent_tag(
+                pid_label,
+                model_tag_short,
+                run_stamp,
+                run_id,
+                result_index,
+            )
             print(
                 f" → Request {generated + 1}/{results} for {job.product_name} (R-{result_index})"
             )
             try:
-                output_bytes = generate_piping_image(
-                    client=client,
-                    model_name=config.model,
-                    use_vertex=config.use_vertex,
-                    prompt=prompt_text,
-                    donor_png=donor_model_bytes,
-                    color_ref_png=color_bytes,
-                    mask_png=mask_bytes,
-                    temperature=config.temperature,
-                    image_size=config.image_size,
-                    aspect_ratio=api_aspect_ratio,
-                )
+                if force_output_bytes is not None:
+                    output_bytes = force_output_bytes
+                else:
+                    _write_recent_file(
+                        out_dir,
+                        RECENT_SUBMITTED_EDIT_DIR,
+                        _recent_filename("edit_donor", ".png", recent_tag_result),
+                        donor_model_bytes,
+                    )
+                    if mask_bytes is not None:
+                        _write_recent_file(
+                            out_dir,
+                            RECENT_SUBMITTED_EDIT_DIR,
+                            _recent_filename("edit_mask", ".png", recent_tag_result),
+                            mask_bytes,
+                        )
+                    output_bytes = generate_piping_image(
+                        client=client,
+                        model_name=config.model,
+                        use_vertex=config.use_vertex,
+                        prompt=prompt_text,
+                        donor_png=donor_model_bytes,
+                        color_ref_png=color_bytes,
+                        mask_png=mask_bytes,
+                        temperature=config.temperature,
+                        image_size=config.image_size,
+                        aspect_ratio=api_aspect_ratio,
+                        response_mime_type=config.response_mime_type,
+                        image_output_mime_type=config.image_output_mime_type,
+                    )
+                if vertex_bg_remove and config.use_vertex:
+                    output_bytes = remove_background_vertex(
+                        output_bytes,
+                        model_name=vertex_bg_model,
+                        output_mime_type=vertex_bg_output_mime or config.image_output_mime_type,
+                        prompt=vertex_bg_prompt,
+                        project=config.project,
+                        location=vertex_bg_location or config.location,
+                        max_bytes=vertex_bg_max_bytes,
+                        max_edge=vertex_bg_max_edge,
+                    )
+                    print(" [post] vertex background removal applied")
+                if force_output_bytes is None:
+                    _write_recent_file(
+                        out_dir,
+                        RECENT_RETURNED_RESULT_DIR,
+                        _recent_filename(
+                            "edit_raw",
+                            _sniff_image_extension(output_bytes),
+                            recent_tag_result,
+                        ),
+                        output_bytes,
+                    )
             except Exception as exc:  # pylint: disable=broad-except
-                print(f" ✖ Failed: {exc}")
+                failures += 1
+                message = str(exc)
+                if "output_mime_type parameter is not supported" in message:
+                    print(" ✖ Failed: output_mime_type not supported; disabling and retrying")
+                    config.image_output_mime_type = None
+                elif "response_mime_type" in message and "not supported" in message:
+                    print(" ✖ Failed: response_mime_type not supported; disabling and retrying")
+                    config.response_mime_type = None
+                else:
+                    print(f" ✖ Failed: {exc}")
+                if failures >= MAX_FAILURES:
+                    raise RuntimeError(
+                        f"Generation failed after {MAX_FAILURES} attempts."
+                    ) from exc
                 continue
 
             if fit_only:
@@ -513,6 +919,16 @@ def run_pipeline(
                     print(" [post] donor alpha was fully opaque; saved output with alpha channel")
                 print(" [post] fit-only; saved output")
                 out_path.write_bytes(output_bytes)
+                _write_recent_file(
+                    out_dir,
+                    RECENT_RETURNED_POST_DIR,
+                    _recent_filename(
+                        "edit_post",
+                        _sniff_image_extension(output_bytes),
+                        recent_tag_result,
+                    ),
+                    output_bytes,
+                )
                 print(f" ✔ Saved -> {out_path}")
                 generated += 1
                 result_index += 1
@@ -570,7 +986,58 @@ def run_pipeline(
                     )
                     if scale_stats.get("scaled"):
                         print(f" [post] scaled output to donor width (scale={scale_stats['scale']:.4f})")
+                if chroma_key_color:
+                    mask_bytes = None
+                    if chroma_key_mask_donor and donor_restore_bytes:
+                        mask_bytes = donor_restore_bytes
+                    output_bytes = apply_chroma_key(
+                        output_bytes,
+                        chroma_key_color,
+                        tolerance=chroma_key_tolerance,
+                        softness=chroma_key_softness,
+                        edge_clip=chroma_key_edge_clip,
+                        mask_bytes=mask_bytes,
+                        mask_threshold=chroma_key_mask_threshold,
+                        mask_expand=chroma_key_mask_expand,
+                    )
+                    print(
+                        " [post] chroma key applied "
+                        f"({chroma_key_label}, tol={chroma_key_tolerance}, "
+                        f"soft={chroma_key_softness}, clip={chroma_key_edge_clip})"
+                    )
+                    if chroma_key_restore_donor and donor_restore_bytes:
+                        output_bytes = apply_donor_alpha(output_bytes, donor_restore_bytes)
+                        output_bytes = restore_rgb_under_alpha(
+                            output_bytes,
+                            donor_restore_bytes,
+                            alpha_threshold=chroma_key_restore_threshold,
+                        )
+                        print(
+                            " [post] donor alpha + RGB restored "
+                            f"(thr={chroma_key_restore_threshold})"
+                        )
+                if model_mask_bytes is not None:
+                    aligned_bytes, _ = fit_output_to_donor(
+                        output_bytes, job.donor_processed
+                    )
+                    donor_mask_bytes = align_mask_bytes(
+                        model_mask_bytes,
+                        (donor_meta.width, donor_meta.height),
+                        threshold=model_mask_threshold,
+                    )
+                    output_bytes = composite_with_mask(
+                        aligned_bytes,
+                        job.donor_processed,
+                        donor_mask_bytes,
+                    )
+                    print(" [post] composited piping onto donor via model mask")
                 raw_attempts = 0
+                preview_bytes = None
+                if preview_bg_color:
+                    preview_bytes = composite_over_background(
+                        output_bytes,
+                        preview_bg_color,
+                    )
                 ext = _sniff_image_extension(output_bytes)
                 if ext != ".png":
                     out_path = out_dir / f"{out_stem}{ext}"
@@ -583,6 +1050,50 @@ def run_pipeline(
                         f"({out_w}x{out_h})"
                     )
                 print(f" ✔ Saved -> {out_path}")
+                if config.enforce_adobe_rgb:
+                    if ensure_adobe_rgb(out_path, config.adobe_rgb_icc):
+                        print(" ✔ Converted to Adobe RGB (1998)")
+                    else:
+                        print(" ⚠ Adobe RGB conversion skipped/failed")
+                if config.enforce_dpi:
+                    changed, found = ensure_dpi(out_path, config.target_dpi)
+                    if changed:
+                        if found:
+                            print(
+                                f" ⚠ DPI was {found[0]:.1f}x{found[1]:.1f}; "
+                                f"set to {config.target_dpi} DPI"
+                            )
+                        else:
+                            print(f" ⚠ DPI missing; set to {config.target_dpi} DPI")
+                    else:
+                        if found:
+                            print(
+                                f" ✔ DPI already {found[0]:.1f}x{found[1]:.1f}"
+                            )
+                if preview_bytes is not None:
+                    preview_path = out_dir / f"{out_stem}_preview.png"
+                    preview_path.write_bytes(preview_bytes)
+                    print(f" ✔ Saved preview -> {preview_path}")
+                    if config.enforce_adobe_rgb:
+                        if ensure_adobe_rgb(preview_path, config.adobe_rgb_icc):
+                            print(" ✔ Converted preview to Adobe RGB (1998)")
+                        else:
+                            print(" ⚠ Adobe RGB conversion skipped/failed (preview)")
+                    if config.enforce_dpi:
+                        changed, found = ensure_dpi(preview_path, config.target_dpi)
+                        if changed:
+                            if found:
+                                print(
+                                    f" ⚠ Preview DPI was {found[0]:.1f}x{found[1]:.1f}; "
+                                    f"set to {config.target_dpi} DPI"
+                                )
+                            else:
+                                print(f" ⚠ Preview DPI missing; set to {config.target_dpi} DPI")
+                        else:
+                            if found:
+                                print(
+                                    f" ✔ Preview DPI already {found[0]:.1f}x{found[1]:.1f}"
+                                )
                 generated += 1
                 result_index += 1
                 continue
@@ -669,8 +1180,67 @@ def run_pipeline(
                         f"edge_guard={stats['edge_guard_px']}px"
                     )
 
+            preview_bytes = None
+            if preview_bg_color:
+                preview_bytes = composite_over_background(
+                    output_bytes,
+                    preview_bg_color,
+                )
             out_path.write_bytes(output_bytes)
             print(f" ✔ Saved -> {out_path}")
+            if config.enforce_adobe_rgb:
+                if ensure_adobe_rgb(out_path, config.adobe_rgb_icc):
+                    print(" ✔ Converted to Adobe RGB (1998)")
+                else:
+                    print(" ⚠ Adobe RGB conversion skipped/failed")
+            if config.enforce_dpi:
+                changed, found = ensure_dpi(out_path, config.target_dpi)
+                if changed:
+                    if found:
+                        print(
+                            f" ⚠ DPI was {found[0]:.1f}x{found[1]:.1f}; "
+                            f"set to {config.target_dpi} DPI"
+                        )
+                    else:
+                        print(f" ⚠ DPI missing; set to {config.target_dpi} DPI")
+                else:
+                    if found:
+                        print(f" ✔ DPI already {found[0]:.1f}x{found[1]:.1f}")
+            if preview_bytes is not None:
+                preview_path = out_dir / f"{out_stem}_preview.png"
+                preview_path.write_bytes(preview_bytes)
+                print(f" ✔ Saved preview -> {preview_path}")
+                if config.enforce_adobe_rgb:
+                    if ensure_adobe_rgb(preview_path, config.adobe_rgb_icc):
+                        print(" ✔ Converted preview to Adobe RGB (1998)")
+                    else:
+                        print(" ⚠ Adobe RGB conversion skipped/failed (preview)")
+                if config.enforce_dpi:
+                    changed, found = ensure_dpi(preview_path, config.target_dpi)
+                    if changed:
+                        if found:
+                            print(
+                                f" ⚠ Preview DPI was {found[0]:.1f}x{found[1]:.1f}; "
+                                f"set to {config.target_dpi} DPI"
+                            )
+                        else:
+                            print(f" ⚠ Preview DPI missing; set to {config.target_dpi} DPI")
+                    else:
+                        if found:
+                            print(
+                                f" ✔ Preview DPI already {found[0]:.1f}x{found[1]:.1f}"
+                            )
+            post_bytes = out_path.read_bytes()
+            _write_recent_file(
+                out_dir,
+                RECENT_RETURNED_POST_DIR,
+                _recent_filename(
+                    "edit_post",
+                    out_path.suffix or ".png",
+                    recent_tag_result,
+                ),
+                post_bytes,
+            )
             generated += 1
             result_index += 1
 

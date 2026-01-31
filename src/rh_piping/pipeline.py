@@ -11,7 +11,7 @@ import re
 import uuid
 from datetime import datetime, timezone
 
-from PIL import Image, ImageOps, ImageStat
+from PIL import Image, ImageOps
 
 from rh_piping.config import AppConfig
 from rh_piping.genai_client import (
@@ -24,7 +24,6 @@ from rh_piping.genai_client import (
 from rh_piping.images import (
     aspect_ratio_for_size,
     apply_chroma_key,
-    apply_masked_swatch_color,
     build_model_input,
     build_square_mask_input,
     content_bbox_from_bytes,
@@ -32,8 +31,6 @@ from rh_piping.images import (
     composite_output_with_donor,
     composite_over_background,
     convert_to_4k_png,
-    chroma_delta_in_mask,
-    diff_coverage_in_mask,
     fit_output_to_donor,
     ensure_adobe_rgb,
     ensure_dpi,
@@ -438,18 +435,6 @@ def run_pipeline(
         preserve_luminance = False
         generate_mask = False
         regenerate_mask = False
-    needs_mask_for_fallback = config.force_swatch_fallback
-    if config.force_swatch_fallback:
-        if post_process:
-            print("[info] force swatch fallback enabled; disabling composite post-processing.")
-        post_process = False
-        no_mask = True
-        preserve_luminance = False
-        generate_mask = False
-        regenerate_mask = False
-        if vertex_bg_remove:
-            print("[info] force swatch fallback enabled; skipping Vertex background removal.")
-        vertex_bg_remove = False
     if chroma_key_hex:
         if post_process:
             print("[info] chroma key enabled; disabling composite post-processing.")
@@ -485,8 +470,6 @@ def run_pipeline(
     model_id = normalize_model_id(config.model, config.use_vertex)
     model_tag = _sanitize_model_tag(model_id)
     model_tag_short = _short_model_tag(model_tag)
-    if config.force_swatch_fallback:
-        chroma_key_hex = None
     chroma_key_color = None
     chroma_key_label = None
     if chroma_key_hex:
@@ -584,7 +567,7 @@ def run_pipeline(
             },
         )
         mask_path = None
-        if (post_process and not no_mask) or needs_mask_for_fallback:
+        if post_process and not no_mask:
             mask_path = find_mask_for_product(config.masks_dir, job.product_name)
             if regenerate_mask:
                 mask_path = None
@@ -633,43 +616,13 @@ def run_pipeline(
         elif api_aspect_ratio:
             print(f" api_aspect_ratio={api_aspect_ratio}")
         print(f" results={results}")
-        if mask_path and (not no_mask or needs_mask_for_fallback):
+        if mask_path and not no_mask:
             print(f" mask={mask_path}")
         print("[/job]")
 
         mask_image = None
-        if mask_path and (not no_mask or needs_mask_for_fallback):
+        if mask_path and not no_mask:
             mask_image = load_mask_image(mask_path, (donor_meta.width, donor_meta.height))
-
-        force_output_bytes = None
-        if config.force_swatch_fallback:
-            if mask_image is None:
-                raise RuntimeError("Force swatch fallback requires a valid mask image.")
-            with Image.open(job.donor_processed) as donor_img:
-                donor_img = ImageOps.exif_transpose(donor_img)
-                donor_rgb = donor_img.convert("RGB")
-                donor_alpha = donor_img.getchannel("A") if "A" in donor_img.getbands() else None
-            with Image.open(selected_color_processed) as ref_img:
-                ref_img = ImageOps.exif_transpose(ref_img).convert("RGB")
-                ref_small = ref_img.resize((64, 64), Image.LANCZOS)
-                avg = ImageStat.Stat(ref_small).mean[:3]
-                avg_color = tuple(int(round(c)) for c in avg)
-            solid_ref = Image.new("RGB", donor_rgb.size, avg_color)
-            fallback = apply_masked_swatch_color(
-                donor_rgb,
-                solid_ref,
-                mask_image,
-                expand_px=2,
-                soften_px=0.6,
-                min_luma_gain=0.7,
-                max_luma_gain=0.95,
-            )
-            fallback = fallback.convert("RGBA")
-            if donor_alpha is not None:
-                fallback.putalpha(donor_alpha)
-            buffer = io.BytesIO()
-            fallback.save(buffer, format="PNG")
-            force_output_bytes = buffer.getvalue()
 
         donor_model_bytes, donor_model_size = build_model_input(
             job.donor_processed,
@@ -832,36 +785,33 @@ def run_pipeline(
                 f" → Request {generated + 1}/{results} for {job.product_name} (R-{result_index})"
             )
             try:
-                if force_output_bytes is not None:
-                    output_bytes = force_output_bytes
-                else:
+                _write_recent_file(
+                    out_dir,
+                    RECENT_SUBMITTED_EDIT_DIR,
+                    _recent_filename("edit_donor", ".png", recent_tag_result),
+                    donor_model_bytes,
+                )
+                if mask_bytes is not None:
                     _write_recent_file(
                         out_dir,
                         RECENT_SUBMITTED_EDIT_DIR,
-                        _recent_filename("edit_donor", ".png", recent_tag_result),
-                        donor_model_bytes,
+                        _recent_filename("edit_mask", ".png", recent_tag_result),
+                        mask_bytes,
                     )
-                    if mask_bytes is not None:
-                        _write_recent_file(
-                            out_dir,
-                            RECENT_SUBMITTED_EDIT_DIR,
-                            _recent_filename("edit_mask", ".png", recent_tag_result),
-                            mask_bytes,
-                        )
-                    output_bytes = generate_piping_image(
-                        client=client,
-                        model_name=config.model,
-                        use_vertex=config.use_vertex,
-                        prompt=prompt_text,
-                        donor_png=donor_model_bytes,
-                        color_ref_png=color_bytes,
-                        mask_png=mask_bytes,
-                        temperature=config.temperature,
-                        image_size=config.image_size,
-                        aspect_ratio=api_aspect_ratio,
-                        response_mime_type=config.response_mime_type,
-                        image_output_mime_type=config.image_output_mime_type,
-                    )
+                output_bytes = generate_piping_image(
+                    client=client,
+                    model_name=config.model,
+                    use_vertex=config.use_vertex,
+                    prompt=prompt_text,
+                    donor_png=donor_model_bytes,
+                    color_ref_png=color_bytes,
+                    mask_png=mask_bytes,
+                    temperature=config.temperature,
+                    image_size=config.image_size,
+                    aspect_ratio=api_aspect_ratio,
+                    response_mime_type=config.response_mime_type,
+                    image_output_mime_type=config.image_output_mime_type,
+                )
                 if vertex_bg_remove and config.use_vertex:
                     output_bytes = remove_background_vertex(
                         output_bytes,
@@ -874,17 +824,16 @@ def run_pipeline(
                         max_edge=vertex_bg_max_edge,
                     )
                     print(" [post] vertex background removal applied")
-                if force_output_bytes is None:
-                    _write_recent_file(
-                        out_dir,
-                        RECENT_RETURNED_RESULT_DIR,
-                        _recent_filename(
-                            "edit_raw",
-                            _sniff_image_extension(output_bytes),
-                            recent_tag_result,
-                        ),
-                        output_bytes,
-                    )
+                _write_recent_file(
+                    out_dir,
+                    RECENT_RETURNED_RESULT_DIR,
+                    _recent_filename(
+                        "edit_raw",
+                        _sniff_image_extension(output_bytes),
+                        recent_tag_result,
+                    ),
+                    output_bytes,
+                )
             except Exception as exc:  # pylint: disable=broad-except
                 failures += 1
                 message = str(exc)
@@ -1102,55 +1051,10 @@ def run_pipeline(
                 output_bytes, stats = composite_output_with_donor(
                     output_bytes,
                     job.donor_processed,
-                    apply_mask=not no_mask,
+                    apply_mask=not no_mask and mask_image is not None,
                     preserve_luminance=preserve_luminance,
                     mask_image=mask_image,
                 )
-                if mask_image is not None:
-                    with Image.open(job.donor_processed) as donor_img:
-                        donor_img = ImageOps.exif_transpose(donor_img)
-                        donor_rgb = donor_img.convert("RGB")
-                        alpha_channel = (
-                            donor_img.getchannel("A") if "A" in donor_img.getbands() else None
-                        )
-                    with Image.open(io.BytesIO(output_bytes)) as out_img:
-                        out_img = ImageOps.exif_transpose(out_img).convert("RGB")
-                    diff_cov = diff_coverage_in_mask(donor_rgb, out_img, mask_image)
-                    chroma_delta = chroma_delta_in_mask(donor_rgb, out_img, mask_image)
-                    if diff_cov < 0.02 or chroma_delta < 6.0:
-                        with Image.open(selected_color_processed) as ref_img:
-                            ref_img = ImageOps.exif_transpose(ref_img).convert("RGB")
-                        mask_hist = mask_image.convert("L").histogram()
-                        mask_total = sum(mask_hist)
-                        mask_cov = (
-                            (mask_total - mask_hist[0]) / mask_total if mask_total else 0.0
-                        )
-                        if mask_cov < 0.01:
-                            expand_px = max(4, int(min(donor_rgb.size) * 0.006))
-                        elif mask_cov < 0.02:
-                            expand_px = max(3, int(min(donor_rgb.size) * 0.004))
-                        else:
-                            expand_px = max(2, int(min(donor_rgb.size) * 0.003))
-                        fallback = apply_masked_swatch_color(
-                            donor_rgb,
-                            ref_img,
-                            mask_image,
-                            expand_px=expand_px,
-                            soften_px=0.6,
-                            min_luma_gain=0.7,
-                            max_luma_gain=0.95,
-                        )
-                        fallback = fallback.convert("RGBA")
-                        if alpha_channel is not None:
-                            fallback.putalpha(alpha_channel)
-                        buffer = io.BytesIO()
-                        fallback.save(buffer, format="PNG")
-                        output_bytes = buffer.getvalue()
-                        print(
-                            " [post] mask change too small "
-                            f"(diff={diff_cov:.4f}, chroma={chroma_delta:.2f}); "
-                            "applied swatch color fallback"
-                        )
                 if stats["resized"]:
                     target_w, target_h = stats["target_size"]
                     orig_w, orig_h = stats["original_size"]

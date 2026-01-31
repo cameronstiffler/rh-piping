@@ -15,15 +15,6 @@ from rh_piping.io import ensure_dir
 
 TARGET_LONG_EDGE = 4096
 EDGE_GUARD_PX = 0
-EDGE_DETECT_BLUR = 1
-EDGE_BAND_PX = 6
-EDGE_TOP_PERCENT = 0.35
-DIFF_TOP_PERCENT = 0.12
-MIN_EDGE_THRESHOLD = 1
-MIN_DIFF_THRESHOLD = 1
-MAX_MASK_COVERAGE = 0.5
-MIN_MASK_COVERAGE = 0.005
-MASK_FOLLOWS_DONOR = True
 SHADOW_SEARCH_START = 0.4
 SHADOW_SEARCH_END = 0.95
 SHADOW_MIN_BAND_PX = 4
@@ -808,50 +799,6 @@ def apply_masked_chroma_transfer(
     return Image.composite(recolored, donor_rgb, mask)
 
 
-def _mean_chroma(reference_rgb: Image.Image) -> tuple[int, int]:
-    ycc = reference_rgb.convert("YCbCr")
-    _, cb, cr = ycc.split()
-    cb_mean = int(round(ImageStat.Stat(cb).mean[0]))
-    cr_mean = int(round(ImageStat.Stat(cr).mean[0]))
-    return cb_mean, cr_mean
-
-
-def apply_masked_swatch_color(
-    donor_rgb: Image.Image,
-    reference_rgb: Image.Image,
-    mask: Image.Image,
-    expand_px: int = 0,
-    soften_px: float = 0.0,
-    min_luma_gain: float = 0.7,
-    max_luma_gain: float = 1.0,
-) -> Image.Image:
-    if reference_rgb.size != donor_rgb.size:
-        reference_rgb = ImageOps.fit(reference_rgb, donor_rgb.size, Image.LANCZOS, centering=(0.5, 0.5))
-    donor_y = donor_rgb.convert("YCbCr").split()[0]
-    cb_mean, cr_mean = _mean_chroma(reference_rgb)
-    cb_img = Image.new("L", donor_rgb.size, cb_mean)
-    cr_img = Image.new("L", donor_rgb.size, cr_mean)
-    mask = mask.convert("L")
-    if mask.size != donor_rgb.size:
-        mask = ImageOps.fit(mask, donor_rgb.size, Image.LANCZOS, centering=(0.5, 0.5))
-    if expand_px > 0:
-        kernel = expand_px * 2 + 1
-        mask = mask.filter(ImageFilter.MaxFilter(kernel))
-    if soften_px > 0:
-        mask = mask.filter(ImageFilter.GaussianBlur(soften_px))
-    ref_y = reference_rgb.convert("YCbCr").split()[0]
-    donor_mean = ImageStat.Stat(donor_y, mask=mask).mean[0]
-    ref_mean = ImageStat.Stat(ref_y).mean[0]
-    gain = 1.0
-    if donor_mean > 0:
-        gain = ref_mean / donor_mean
-    gain = max(min_luma_gain, min(max_luma_gain, gain))
-    if gain != 1.0:
-        donor_y = donor_y.point(lambda v: max(0, min(255, int(round(v * gain)))))
-    recolored = Image.merge("YCbCr", (donor_y, cb_img, cr_img)).convert("RGB")
-    return Image.composite(recolored, donor_rgb, mask)
-
-
 def _center_square(image: Image.Image, size: int) -> Image.Image:
     width, height = image.size
     if size > min(width, height):
@@ -930,12 +877,12 @@ def composite_output_with_donor(
         if output_img.size != target_size:
             output_img = ImageOps.fit(output_img, target_size, Image.LANCZOS, centering=(0.5, 0.5))
             resized = True
-        if preserve_luminance:
-            output_img = _preserve_donor_luminance(donor_rgb, output_img)
-        shadow_band = _find_shadow_band(donor_rgb, alpha_channel)
-        if shadow_band is not None:
-            output_img = _apply_shadow_band(donor_rgb, output_img, shadow_band)
         if not apply_mask:
+            if preserve_luminance:
+                output_img = _preserve_donor_luminance(donor_rgb, output_img)
+            shadow_band = _find_shadow_band(donor_rgb, alpha_channel)
+            if shadow_band is not None:
+                output_img = _apply_shadow_band(donor_rgb, output_img, shadow_band)
             composited = output_img.convert("RGBA")
             composited.putalpha(alpha_channel)
             buffer = io.BytesIO()
@@ -955,151 +902,20 @@ def composite_output_with_donor(
                 "edge_guard_px": 0,
             }
             return buffer.getvalue(), stats
+        if mask_image is None:
+            raise ValueError("Mask image is required for masked composite.")
 
-        total_pixels = target_size[0] * target_size[1]
-
-        def coverage_for(mask: Image.Image) -> float:
-            hist = mask.histogram()
-            covered = total_pixels - hist[0]
-            return covered / total_pixels if total_pixels else 0.0
-
-        def build_edge_mask(edge_thresh: int, band_px: int) -> Image.Image:
-            blurred = donor_rgb.filter(ImageFilter.GaussianBlur(EDGE_DETECT_BLUR))
-            edges = blurred.filter(ImageFilter.FIND_EDGES).convert("L")
-            edge_mask = edges.point(lambda p: 255 if p > edge_thresh else 0)
-            if band_px > 0:
-                edge_mask = edge_mask.filter(ImageFilter.MaxFilter(band_px * 2 + 1))
-            return edge_mask
-
-        def build_mask(diff_thresh: int, edge_thresh: int, band_px: int) -> Image.Image:
-            diff = ImageChops.difference(donor_rgb, output_img).convert("L")
-            diff_mask = diff.point(lambda p: 255 if p > diff_thresh else 0)
-            edge_mask = build_edge_mask(edge_thresh, band_px)
-            combined = ImageChops.multiply(diff_mask, edge_mask)
-            return combined.filter(ImageFilter.GaussianBlur(1))
-
-        mask_relaxed = False
-        mask_tightened = False
-        mask_clipped = False
-        mask_already_multiplied = False
+        mask = mask_image
+        if mask.mode != "L":
+            mask = mask.convert("L")
+        if mask.size != target_size:
+            mask = ImageOps.fit(mask, target_size, Image.LANCZOS, centering=(0.5, 0.5))
 
         alpha_binary = alpha_channel.point(lambda p: 255 if p > 0 else 0)
-        edge_full = donor_rgb.filter(ImageFilter.GaussianBlur(EDGE_DETECT_BLUR)).filter(ImageFilter.FIND_EDGES).convert("L")
-        edge_hist_image = ImageChops.multiply(edge_full, alpha_binary)
-        edge_hist = edge_hist_image.histogram()
-
-        def percentile_threshold(hist: list[int], top_percent: float) -> int:
-            target = max(1, int(round(total_pixels * top_percent)))
-            cumulative = 0
-            for value in range(255, -1, -1):
-                cumulative += hist[value]
-                if cumulative >= target:
-                    return value
-            return 0
-
-        edge_thresh = max(MIN_EDGE_THRESHOLD, percentile_threshold(edge_hist, EDGE_TOP_PERCENT))
-        if mask_image is not None:
-            mask = mask_image
-            if mask.mode != "L":
-                mask = mask.convert("L")
-            if mask.size != target_size:
-                mask = ImageOps.fit(mask, target_size, Image.LANCZOS, centering=(0.5, 0.5))
-            mask = ImageChops.multiply(mask, alpha_binary)
-            coverage = coverage_for(mask)
-            mask_already_multiplied = True
-        elif MASK_FOLLOWS_DONOR:
-            mask = build_edge_mask(edge_thresh, EDGE_BAND_PX)
-            coverage = coverage_for(mask)
-            if coverage < MIN_MASK_COVERAGE:
-                relaxed_mask = build_edge_mask(max(1, edge_thresh - 10), EDGE_BAND_PX + 2)
-                relaxed_coverage = coverage_for(relaxed_mask)
-                if relaxed_coverage > coverage:
-                    mask = relaxed_mask
-                    coverage = relaxed_coverage
-                    mask_relaxed = True
-            if coverage > MAX_MASK_COVERAGE:
-                best_mask = mask
-                best_coverage = coverage
-                edge_iter = edge_thresh
-                band_px = EDGE_BAND_PX
-                for _ in range(3):
-                    edge_iter += 10
-                    band_px = max(1, band_px - 2)
-                    candidate = build_edge_mask(edge_iter, band_px)
-                    candidate_coverage = coverage_for(candidate)
-                    if candidate_coverage < best_coverage:
-                        best_mask = candidate
-                        best_coverage = candidate_coverage
-                        mask_tightened = True
-                mask = best_mask
-                coverage = best_coverage
-                if coverage > MAX_MASK_COVERAGE:
-                    mask = Image.new("L", target_size, 0)
-                    coverage = 0.0
-                    mask_clipped = True
-        else:
-            diff_full = ImageChops.difference(donor_rgb, output_img).convert("L")
-            diff_hist_image = ImageChops.multiply(diff_full, alpha_binary)
-            diff_hist = diff_hist_image.histogram()
-            diff_thresh = max(MIN_DIFF_THRESHOLD, percentile_threshold(diff_hist, DIFF_TOP_PERCENT))
-
-            mask = build_mask(diff_thresh, edge_thresh, EDGE_BAND_PX)
-            coverage = coverage_for(mask)
-            if coverage < MIN_MASK_COVERAGE:
-                relaxed_mask = build_mask(
-                    max(1, diff_thresh - 8),
-                    max(1, edge_thresh - 10),
-                    EDGE_BAND_PX + 1,
-                )
-                relaxed_coverage = coverage_for(relaxed_mask)
-                if relaxed_coverage > coverage:
-                    mask = relaxed_mask
-                    coverage = relaxed_coverage
-                    mask_relaxed = True
-            if coverage > MAX_MASK_COVERAGE:
-                best_mask = mask
-                best_coverage = coverage
-                diff_iter = diff_thresh
-                edge_iter = edge_thresh
-                band_px = EDGE_BAND_PX
-                for _ in range(3):
-                    diff_iter += 6
-                    edge_iter += 8
-                    band_px = max(1, band_px - 1)
-                    candidate = build_mask(diff_iter, edge_iter, band_px)
-                    candidate_coverage = coverage_for(candidate)
-                    if candidate_coverage < best_coverage:
-                        best_mask = candidate
-                        best_coverage = candidate_coverage
-                        mask_tightened = True
-                mask = best_mask
-                coverage = best_coverage
-                if coverage > MAX_MASK_COVERAGE:
-                    mask = Image.new("L", target_size, 0)
-                    coverage = 0.0
-                    mask_clipped = True
-
-        if not mask_already_multiplied:
-            mask = ImageChops.multiply(mask, alpha_binary)
-        guard_px = EDGE_GUARD_PX
-        guard_used = guard_px
-        if guard_px > 0:
-            guard_size = guard_px * 2 + 1
-            interior = alpha_binary.filter(ImageFilter.MinFilter(guard_size))
-            guarded = ImageChops.multiply(mask, interior)
-            guarded_coverage = coverage_for(guarded)
-            if guarded_coverage < 0.001 and guard_px > 2:
-                guard_px = 2
-                guard_size = guard_px * 2 + 1
-                interior = alpha_binary.filter(ImageFilter.MinFilter(guard_size))
-                guarded = ImageChops.multiply(mask, interior)
-                guard_used = guard_px
-                guarded_coverage = coverage_for(guarded)
-            if guarded_coverage < 0.0005:
-                guard_used = 0
-                guarded = mask
-            mask = guarded
-            coverage = coverage_for(mask)
+        mask = ImageChops.multiply(mask, alpha_binary)
+        total_pixels = target_size[0] * target_size[1]
+        hist = mask.histogram()
+        coverage = (total_pixels - hist[0]) / total_pixels if total_pixels else 0.0
 
         composited = Image.composite(output_img, donor_rgb, mask)
         composited = composited.convert("RGBA")
@@ -1111,12 +927,13 @@ def composite_output_with_donor(
             "resized": resized,
             "target_size": target_size,
             "original_size": original_size,
-            "preserve_luminance": preserve_luminance,
-            "shadow_band": shadow_band,
+            "preserve_luminance": False,
+            "shadow_band": None,
+            "mask_disabled": False,
             "mask_coverage": coverage,
-            "mask_relaxed": mask_relaxed,
-            "mask_tightened": mask_tightened,
-            "mask_clipped": mask_clipped,
-            "edge_guard_px": guard_used,
+            "mask_relaxed": False,
+            "mask_tightened": False,
+            "mask_clipped": False,
+            "edge_guard_px": EDGE_GUARD_PX,
         }
         return buffer.getvalue(), stats

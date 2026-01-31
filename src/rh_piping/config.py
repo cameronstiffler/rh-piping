@@ -45,7 +45,6 @@ class AppConfig:
     vertex_bg_max_bytes: int | None
     vertex_bg_max_edge: int | None
     preview_bg_hex: str | None
-    force_swatch_fallback: bool
     enforce_adobe_rgb: bool
     adobe_rgb_icc: str | None
     enforce_dpi: bool
@@ -131,7 +130,6 @@ def load_config() -> AppConfig:
     vertex_bg_max_bytes = _env_int("VERTEX_BG_MAX_BYTES")
     vertex_bg_max_edge = _env_int("VERTEX_BG_MAX_EDGE")
     preview_bg_hex = _env_str("PREVIEW_BG_HEX")
-    force_swatch_fallback = _env_flag("FORCE_SWATCH_FALLBACK", default=False)
     enforce_adobe_rgb = _env_flag("ENFORCE_ADOBE_RGB", default=False)
     adobe_rgb_icc = _env_str("ADOBE_RGB_ICC")
     enforce_dpi = _env_flag("ENFORCE_DPI", default=False)
@@ -172,7 +170,6 @@ def load_config() -> AppConfig:
         vertex_bg_max_bytes=vertex_bg_max_bytes,
         vertex_bg_max_edge=vertex_bg_max_edge,
         preview_bg_hex=preview_bg_hex,
-        force_swatch_fallback=force_swatch_fallback,
         enforce_adobe_rgb=enforce_adobe_rgb,
         adobe_rgb_icc=adobe_rgb_icc,
         enforce_dpi=enforce_dpi,

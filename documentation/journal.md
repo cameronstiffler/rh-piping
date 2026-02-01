@@ -248,6 +248,145 @@ This log captures notable work, decisions, and approach changes. Append new entr
 
 ---
 
+## 2026-01-31 (Sat)
+
+### Summary
+- Tightened MID-7 wording to request full piping band (not hairline) and reran; output saved as R16.
+
+### What we did
+- Updated `prompts/mask_pass/mask_prompt_MID-7.md` to emphasize thicker piping bands and include arms/base piping.
+- Ran PID-7; mask coverage ~4.36%, output saved to `output/Provence_Sofa112in_NaturalWeave_prod34270121_F_CC/ProvenceSo1bf4_PID-7_gemini849_FM_R16.png`.
+
+---
+
+## 2026-01-31 (Sat)
+
+### Summary
+- Added console logging for model + location on each run.
+
+---
+
+## 2026-01-31 (Sat)
+
+### Summary
+- Added Gemini segmentation mask path (JSON masks) with per-PID `_seg` MID prompts.
+
+---
+
+## 2026-01-31 (Sat)
+
+### Summary
+- Segmentation mask parser now supports 0–1000 normalized boxes; `_seg` prompts updated accordingly.
+
+---
+
+## 2026-01-31 (Sat)
+
+### Summary
+- Added Vertex SAM2 endpoint support for mask generation (optional via env/CLI).
+
+### What we did
+- Added `SAM2_VERTEX_ENDPOINT`/`SAM2_VERTEX_LOCATION` config + CLI overrides.
+- Implemented Vertex PredictionService SAM2 calls and mask parsing/selection.
+
+### Approaches and why we switched
+- You asked to call SAM2 on Vertex instead of the Hugging Face space.
+
+---
+
+## 2026-01-31 (Sat)
+
+### Summary
+- Added piping reference images to the model inputs as visual examples (outlined piping).
+
+### What we did
+- Loaded `assets/original/piping_ref_images/`, converted to processed PNGs, and injected them into edit + mask calls.
+- Added `PIPING_REF_MAX` to cap how many reference images are included.
+
+### Approaches and why we switched
+- In‑context examples should help the model localize piping without fine‑tuning.
+
+---
+
+## 2026-01-31 (Sat)
+
+### Summary
+- Moved piping reference input folder to a dedicated highlighted‑image directory.
+
+### What we did
+- Switched to `assets/original/piping_ref_highlighted/` (and matching processed folder) for piping refs.
+
+### Approaches and why we switched
+- You want refs that already have piping explicitly highlighted.
+
+---
+
+## 2026-01-31 (Sat)
+
+### Summary
+- Added optional local SAM2 (Transformers) mask generation path.
+
+### What we did
+- Added `SAM2_LOCAL_MODEL` config/CLI support and a local SAM2 mask runner.
+
+### Approaches and why we switched
+- You want to try SAM2 locally with the large model.
+
+---
+
+## 2026-01-31 (Sat)
+
+### Summary
+- Disabled Gemini model-mask pass when SAM2 mask generation is enabled.
+
+### What we did
+- Pipeline now turns off model mask pass whenever `--generate-mask` is used.
+
+### Approaches and why we switched
+- You want SAM2 to be the only mask source.
+
+---
+
+## 2026-01-31 (Sat)
+
+### Summary
+- Constrained local SAM2 prompts to cushion regions and refined masks to avoid wicker.
+
+### What we did
+- Added a cushion-body mask to sample foreground points and to refine SAM2 masks.
+
+### Approaches and why we switched
+- The SAM2 auto mask was picking wicker/arms; we now bias toward upholstery.
+
+---
+
+## 2026-01-31 (Sat)
+
+### Summary
+- Added SAM2 target mode to generate cushion masks (positive = cushions).
+
+### What we did
+- Added `SAM2_TARGET` (piping/cushions) and cushion‑focused prompting/scoring.
+
+### Approaches and why we switched
+- You want a cushion‑only positive mask from SAM2.
+
+---
+
+## 2026-01-31 (Sat)
+
+### Summary
+- Implemented the new cushion‑mask workflow (cushion outline → edit → diff mask → composite).
+
+### What we did
+- Added `CUSHION_MASK_PASS` and cushion outline mask generation from donor.
+- Edit step uses cushion outline mask; post uses diff mask clipped to cushion mask.
+
+### Approaches and why we switched
+- You specified a new workflow centered on cushion outlines and piping diff masks.
+
+---
+
 ## Next Entry Template
 
 ### Date
@@ -264,3 +403,69 @@ YYYY-MM-DD
 
 ### Questions / decisions to revisit
 - ...
+
+---
+
+## 2026-02-01 (Sun)
+
+### Summary
+- Shifted segmentation mask pass to produce filled cushion masks as images (Gemini Flash).
+
+### What we did
+- Updated `prompts/mask_pass/mask_prompt_MID-7_seg.md` to request a PNG cushion mask.
+- Allowed segmentation mask pass to run alongside mask-from-output for post compositing.
+- Enabled segmentation image output via `SEGMENTATION_RESPONSE_MIME_TYPE=image/png` and set `SEGMENTATION_MASK_MODEL=gemini-2.5-flash`.
+
+### Approaches and why we switched
+- JSON masks were truncating; image masks avoid token limits and fit the new cushion-mask workflow.
+
+### Update
+- Vertex Gemini Flash does not support image-mask output; reverted segmentation masks to JSON RLE for cushion masks.
+- Added COCO RLE string decoding for segmentation masks and bumped segmentation max output tokens to 16384.
+- Added fallback parsing of `bits` masks from truncated segmentation text responses.
+- Hardened `bits` mask parsing to handle wrapped/truncated outputs (whitespace + padding).
+- Allowed segmentation mask pass to continue even when mask coverage is near-zero (inspection mode).
+
+---
+
+## 2026-02-01 (Sun)
+
+### Final export notes (R27)
+- Command: `python3 -m rh_piping --pid 7 --product "Provence_Sofa112in_NaturalWeave_prod34270121_F_CC" --segmentation-mask-pass --segmentation-mask-model gemini-2.5-pro --mask-from-output --results 1`
+- Donor: `assets/processed/donor_image/Provence_Sofa112in_NaturalWeave_prod34270121_F_CC.png` (4096x1204, RGBA)
+- Prompt: `prompts/initial_prompt_PID-7.md`
+- Segmentation prompt: `prompts/mask_pass/mask_prompt_MID-7_seg.md` (cushion mask, bits format)
+- Masking flow:
+  - Segmentation mask pass executed (Gemini 2.5 Pro); mask saved but coverage reported 0.0000.
+  - Mask-from-output used for post composite to preserve donor geometry.
+  - Post fit output to donor canvas 4096x1204; donor alpha applied.
+- Output: `output/Provence_Sofa112in_NaturalWeave_prod34270121_F_CC/ProvenceSo1bf4_PID-7_gemini849_FM_R27.png`
+- Color/DPI: Converted to Adobe RGB (1998); DPI set to 300.
+- Recent artifacts:
+  - Segmentation response JSON saved under `output/Provence_Sofa112in_NaturalWeave_prod34270121_F_CC/recent/returned/mask/`.
+  - Submitted donor for segmentation saved under `output/Provence_Sofa112in_NaturalWeave_prod34270121_F_CC/recent/submitted/mask/`.
+
+### Detail: Final image source of cushion interiors
+- Final composite uses donor as the base. The post step composites *only* pixels included by the diff mask.
+- Diff mask is built from the pixel differences between donor and model output; only those changed areas are applied back onto the donor.
+- Therefore, cushion interiors in the final output are sourced from the **donor image by default**.
+- Cushion interior pixels will only come from the model output if the model changed those regions enough to be captured by the diff mask.
+- This keeps geometry and most fabric texture identical to the donor while allowing selective piping changes to be transferred.
+- Added filled cushion mask generation and fallback: when segmentation returns near-zero coverage, pipeline now builds a cushion body mask from the donor and uses it instead.
+- Updated MID-7 segmentation prompt to request official Gemini segmentation format (base64 PNG mask) and set thinking_budget=0 for 2.5 Flash segmentation requests.
+- Added base64-mask parsing fallback from truncated segmentation JSON and donor cushion-mask fallback when segmentation output is unusable.
+- Updated MID-7 segmentation prompt to prefer 32x32 mask size to reduce base64 output and truncation risk.
+- Segmentation (or fallback) cushion mask now also gates the post diff-mask, preventing edits outside cushions (e.g., wicker).
+- Added `--mask-only` CLI option to generate masks and skip edit/post output.
+- Applied `thinking_budget=0` for Gemini 2.5 Pro segmentation requests (previously Flash-only).
+- Added retry logic to drop `thinking_config` when Vertex rejects `thinking_budget=0` for Gemini 2.5 Pro.
+- Disabled donor-derived cushion-mask fallback for segmentation; segmentation must now succeed or the run stops.
+- Made base64-mask extraction more tolerant of truncated JSON by scanning from the base64 marker or mask key when quotes are missing.
+- Updated MID-7 segmentation prompt to prefer 16x16 mask size to reduce base64 truncation.
+- Updated MID-7 segmentation prompt to request raw base64 PNG binary mask (no JSON) to reduce truncation.
+- Made base64 mask extraction tolerant of JPEG (`/9j/`) and raw base64 headers to recover truncated non-JSON mask outputs.
+- Replaced MID-7 model mask prompt with cushion-only binary mask instructions.
+- Allowed model mask pass to run alongside mask-from-output; model mask now gates post diff-mask when enabled.
+- Enabled MODEL_MASK_PASS in .env to include cushion mask in the full workflow by default.
+- Stopped CLI from disabling model-mask pass when --mask-from-output is set so cushion masks can gate post composites.
+- Forced model mask generation to always use donor-sized masks so the cushion mask can reliably gate post diff compositing.

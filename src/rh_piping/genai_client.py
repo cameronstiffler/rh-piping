@@ -64,6 +64,26 @@ def extract_image_from_response(response) -> bytes:
     raise RuntimeError("No image returned by model response.")
 
 
+def extract_text_from_response(response) -> str:
+    texts: list[str] = []
+    for candidate in getattr(response, "candidates", []) or []:
+        content = getattr(candidate, "content", None)
+        for part in getattr(content, "parts", []) if content else []:
+            text = getattr(part, "text", None)
+            if text:
+                texts.append(text)
+    parts = getattr(response, "parts", None)
+    if parts:
+        for part in parts:
+            text = getattr(part, "text", None)
+            if text:
+                texts.append(text)
+    direct_text = getattr(response, "text", None)
+    if direct_text:
+        texts.append(direct_text)
+    return "\n".join(texts).strip()
+
+
 def summarize_response_for_debug(response) -> str:
     summaries = []
     parts = getattr(response, "parts", None)
@@ -100,6 +120,7 @@ def generate_piping_image(
     prompt: str,
     donor_png: bytes,
     color_ref_png: bytes,
+    piping_ref_pngs: list[bytes] | None,
     mask_png: bytes | None,
     temperature: float,
     image_size: str | None,
@@ -114,6 +135,22 @@ def generate_piping_image(
         image_part_from_bytes(color_ref_png),
         {"text": "Color reference for the new piping material."},
     ]
+    if piping_ref_pngs:
+        parts.append(
+            {
+                "text": (
+                    "Piping reference examples follow. The piping is outlined in cyan "
+                    "(#00daee), 3px stroke. Use those outlines only as visual guidance."
+                )
+            }
+        )
+        for idx, ref_png in enumerate(piping_ref_pngs, start=1):
+            parts.extend(
+                [
+                    image_part_from_bytes(ref_png),
+                    {"text": f"Piping reference {idx}: outlined areas indicate piping."},
+                ]
+            )
     if mask_png is not None:
         parts.extend(
             [
@@ -158,11 +195,28 @@ def generate_piping_mask(
     use_vertex: bool,
     prompt: str,
     donor_png: bytes,
+    piping_ref_pngs: list[bytes] | None,
     image_size: str | None,
     aspect_ratio: str | None,
 ) -> bytes:
     model_id = normalize_model_id(model_name, use_vertex)
     parts = [image_part_from_bytes(donor_png)]
+    if piping_ref_pngs:
+        parts.append(
+            {
+                "text": (
+                    "Piping reference examples follow. The piping is outlined in cyan "
+                    "(#00daee), 3px stroke. Use those outlines only as visual guidance."
+                )
+            }
+        )
+        for idx, ref_png in enumerate(piping_ref_pngs, start=1):
+            parts.extend(
+                [
+                    image_part_from_bytes(ref_png),
+                    {"text": f"Piping reference {idx}: outlined areas indicate piping."},
+                ]
+            )
     if prompt.strip():
         parts.append({"text": prompt})
     config_kwargs: dict[str, object] = {
@@ -189,6 +243,83 @@ def generate_piping_mask(
         raise RuntimeError(
             f"{exc} (response summary: {debug_summary}, prompt_feedback={prompt_feedback})"
         ) from exc
+
+
+def generate_segmentation_mask_response(
+    *,
+    client: genai.Client,
+    model_name: str,
+    use_vertex: bool,
+    prompt: str,
+    donor_png: bytes,
+    piping_ref_pngs: list[bytes] | None,
+    response_mime_type: str | None = "application/json",
+    max_output_tokens: int | None = None,
+) -> tuple[str | None, bytes | None]:
+    model_id = normalize_model_id(model_name, use_vertex)
+    parts = [image_part_from_bytes(donor_png)]
+    if piping_ref_pngs:
+        parts.append(
+            {
+                "text": (
+                    "Piping reference examples follow. The piping is outlined in cyan "
+                    "(#00daee), 3px stroke. Use those outlines only as visual guidance."
+                )
+            }
+        )
+        for idx, ref_png in enumerate(piping_ref_pngs, start=1):
+            parts.extend(
+                [
+                    image_part_from_bytes(ref_png),
+                    {"text": f"Piping reference {idx}: outlined areas indicate piping."},
+                ]
+            )
+    if prompt.strip():
+        parts.append({"text": prompt})
+    response_modalities = ["TEXT"]
+    if response_mime_type and response_mime_type.startswith("image/"):
+        response_modalities = ["IMAGE"]
+    config_kwargs: dict[str, object] = {
+        "temperature": 0.0,
+        "response_modalities": response_modalities,
+    }
+    if response_mime_type:
+        config_kwargs["response_mime_type"] = response_mime_type
+    if max_output_tokens is not None:
+        config_kwargs["max_output_tokens"] = max_output_tokens
+    model_lower = model_name.lower()
+    if "2.5-flash" in model_lower or "2.5-pro" in model_lower:
+        config_kwargs["thinking_config"] = types.ThinkingConfig(thinking_budget=0)
+    try:
+        response = client.models.generate_content(
+            model=model_id,
+            contents=parts,
+            config=types.GenerateContentConfig(**config_kwargs),
+        )
+    except Exception as exc:
+        message = str(exc)
+        retried = False
+        if response_mime_type and "response_mime_type" in message and "not supported" in message:
+            config_kwargs.pop("response_mime_type", None)
+            retried = True
+        if "thinking_budget" in message and "not support" in message:
+            config_kwargs.pop("thinking_config", None)
+            retried = True
+        if retried:
+            response = client.models.generate_content(
+                model=model_id,
+                contents=parts,
+                config=types.GenerateContentConfig(**config_kwargs),
+            )
+        else:
+            raise
+    text = extract_text_from_response(response)
+    image_bytes = None
+    try:
+        image_bytes = extract_image_from_response(response)
+    except RuntimeError:
+        image_bytes = None
+    return text or None, image_bytes
 
 
 def _extract_vertex_image_bytes(image_obj) -> bytes:

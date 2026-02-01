@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import base64
 import io
+import json
 from math import gcd
 from pathlib import Path
+import re
 
 import os
 
@@ -474,6 +477,568 @@ def normalize_mask_bytes_exact(
     buffer = io.BytesIO()
     mask_rgb.save(buffer, format="PNG")
     return buffer.getvalue()
+
+
+_JSON_FENCE_RE = re.compile(r"```(?:json)?(.*?)```", re.DOTALL | re.IGNORECASE)
+
+
+def _strip_json_fences(text: str) -> str:
+    match = _JSON_FENCE_RE.search(text)
+    if match:
+        return match.group(1).strip()
+    return text.strip()
+
+
+def _json_load_loose(payload: str):
+    try:
+        return json.loads(payload)
+    except json.JSONDecodeError:
+        try:
+            return json.loads(payload, strict=False)
+        except TypeError:
+            return json.loads(payload)
+        except json.JSONDecodeError:
+            return None
+
+
+def _load_json_payload(text: str):
+    cleaned = _strip_json_fences(text)
+    if not cleaned:
+        raise ValueError("Empty segmentation response.")
+    cleaned = cleaned.strip()
+    loaded = _json_load_loose(cleaned)
+    if loaded is not None:
+        return loaded
+    start = min(
+        (idx for idx in (cleaned.find("{"), cleaned.find("[")) if idx != -1),
+        default=-1,
+    )
+    end = max(cleaned.rfind("}"), cleaned.rfind("]"))
+    snippet = None
+    if start != -1 and end != -1 and end > start:
+        snippet = cleaned[start : end + 1]
+        loaded = _json_load_loose(snippet)
+        if loaded is not None:
+            return loaded
+    cleaned_sanitized = re.sub(r"[\x00-\x1F\x7F]", "", cleaned)
+    loaded = _json_load_loose(cleaned_sanitized)
+    if loaded is not None:
+        return loaded
+    if snippet:
+        snippet_sanitized = re.sub(r"[\x00-\x1F\x7F]", "", snippet)
+        loaded = _json_load_loose(snippet_sanitized)
+        if loaded is not None:
+            return loaded
+    raise ValueError("No JSON object found in segmentation response.")
+
+
+def _extract_segmentation_items(payload) -> list[dict]:
+    if isinstance(payload, list):
+        return [item for item in payload if isinstance(item, dict)]
+    if isinstance(payload, dict):
+        for key in ("masks", "objects", "segments", "annotations", "predictions", "results"):
+            value = payload.get(key)
+            if isinstance(value, list):
+                return [item for item in value if isinstance(item, dict)]
+        if any(k in payload for k in ("mask", "segmentation", "box_2d", "bbox", "bounding_box")):
+            return [payload]
+    return []
+
+
+def _decode_base64_blob(blob: str) -> bytes:
+    cleaned = blob.strip()
+    if cleaned.startswith("data:") and "," in cleaned:
+        cleaned = cleaned.split(",", 1)[1]
+    return base64.b64decode(cleaned)
+
+
+def _bitstring_to_mask(bit_text: str, size: tuple[int, int]) -> Image.Image | None:
+    if not bit_text:
+        return None
+    bits = [1 if ch == "1" else 0 for ch in bit_text if ch in "01"]
+    if not bits:
+        return None
+    height, width = size
+    total = height * width
+    if total <= 0:
+        return None
+    if len(bits) < total:
+        bits = bits + [0] * (total - len(bits))
+    if len(bits) > total:
+        bits = bits[:total]
+    data = bytes(255 if b else 0 for b in bits)
+    return Image.frombytes("L", (width, height), data)
+
+
+def _coerce_mask_image(mask_info) -> Image.Image | None:
+    if mask_info is None:
+        return None
+    width = height = None
+    payload = None
+    if isinstance(mask_info, dict):
+        rle_mask = _coerce_rle_mask(mask_info)
+        if rle_mask is not None:
+            return rle_mask
+        bit_payload = (
+            mask_info.get("bits")
+            or mask_info.get("mask_bits")
+            or mask_info.get("bitmap")
+            or mask_info.get("bitmask")
+        )
+        size_payload = mask_info.get("size") or mask_info.get("shape")
+        if bit_payload and size_payload:
+            size = _parse_rle_size(size_payload)
+            if size:
+                bit_mask = _bitstring_to_mask(str(bit_payload), size)
+                if bit_mask is not None:
+                    return bit_mask
+    if isinstance(mask_info, dict):
+        payload = (
+            mask_info.get("data")
+            or mask_info.get("image")
+            or mask_info.get("png")
+            or mask_info.get("mask")
+            or mask_info.get("bytes")
+        )
+        width = mask_info.get("width") or mask_info.get("w")
+        height = mask_info.get("height") or mask_info.get("h")
+    elif isinstance(mask_info, str):
+        payload = mask_info
+    if not payload:
+        return None
+    raw = _decode_base64_blob(payload) if isinstance(payload, str) else payload
+    try:
+        with Image.open(io.BytesIO(raw)) as mask_img:
+            return ImageOps.exif_transpose(mask_img).convert("L")
+    except Exception:
+        if width and height:
+            w = int(width)
+            h = int(height)
+            if w > 0 and h > 0:
+                if len(raw) == w * h:
+                    return Image.frombytes("L", (w, h), raw)
+                if len(raw) == w * h * 4:
+                    return Image.frombytes("RGBA", (w, h), raw).convert("L")
+    return None
+
+
+def _parse_rle_size(size_info) -> tuple[int, int] | None:
+    if isinstance(size_info, (list, tuple)) and len(size_info) == 2:
+        h = int(size_info[0])
+        w = int(size_info[1])
+        if h > 0 and w > 0:
+            return h, w
+    if isinstance(size_info, dict):
+        h = size_info.get("height") or size_info.get("h")
+        w = size_info.get("width") or size_info.get("w")
+        if h and w:
+            return int(h), int(w)
+    return None
+
+
+def _decode_coco_rle(rle_text: str) -> list[int] | None:
+    if not rle_text:
+        return None
+    counts: list[int] = []
+    m = 0
+    p = 0
+    for ch in rle_text:
+        x = ord(ch) - 48
+        if x < 0:
+            continue
+        m |= (x & 0x1F) << (5 * p)
+        if x & 0x20:
+            p += 1
+        else:
+            if x & 0x10:
+                m |= -1 << (5 * p)
+            counts.append(m)
+            m = 0
+            p = 0
+    if not counts:
+        return None
+    if any(v < 0 for v in counts):
+        return None
+    return counts
+
+
+def _parse_rle_counts(counts_info) -> list[int] | None:
+    if counts_info is None:
+        return None
+    if isinstance(counts_info, list):
+        try:
+            return [int(round(float(v))) for v in counts_info]
+        except (TypeError, ValueError):
+            return None
+    if isinstance(counts_info, str):
+        if any(ch.isalpha() for ch in counts_info):
+            decoded = _decode_coco_rle(counts_info.strip())
+            if decoded:
+                return decoded
+        nums = re.findall(r"\d+", counts_info)
+        if nums:
+            return [int(n) for n in nums]
+    return None
+
+
+def _rle_to_mask(
+    counts: list[int],
+    size: tuple[int, int],
+    order: str = "row-major",
+) -> Image.Image:
+    height, width = size
+    total = height * width
+    flat = bytearray(total)
+    idx = 0
+    val = 0
+    for run in counts:
+        if run <= 0:
+            val = 1 - val
+            continue
+        end = idx + run
+        if end > total:
+            end = total
+        if val == 1:
+            flat[idx:end] = b"\xff" * (end - idx)
+        idx = end
+        if idx >= total:
+            break
+        val = 1 - val
+    if order.lower().startswith("col") or order.lower().startswith("fortran"):
+        reordered = bytearray(total)
+        for i in range(total):
+            y = i % height
+            x = i // height
+            if x >= width:
+                break
+            reordered[y * width + x] = flat[i]
+        flat = reordered
+    return Image.frombytes("L", (width, height), bytes(flat))
+
+
+def _coerce_rle_mask(mask_info) -> Image.Image | None:
+    if not isinstance(mask_info, dict):
+        return None
+    rle = None
+    order = "row-major"
+    if "rle" in mask_info and isinstance(mask_info["rle"], dict):
+        rle = mask_info["rle"]
+        order = (
+            rle.get("order")
+            or rle.get("layout")
+            or rle.get("encoding")
+            or "row-major"
+        )
+    elif "counts" in mask_info and "size" in mask_info:
+        rle = mask_info
+    if rle is None:
+        return None
+    counts = _parse_rle_counts(rle.get("counts"))
+    size = _parse_rle_size(rle.get("size"))
+    if counts is None or size is None:
+        return None
+    return _rle_to_mask(counts, size, order=order)
+
+
+def _scale_coord(value: float, max_value: int, normalized: bool, normalized_max: float = 1.0) -> int:
+    if normalized:
+        return int(round((value / normalized_max) * max_value))
+    return int(round(value))
+
+
+def _parse_box_list(values: list[float], target_size: tuple[int, int]) -> tuple[int, int, int, int] | None:
+    if len(values) != 4:
+        return None
+    width, height = target_size
+    normalized = False
+    normalized_max = 1.0
+    if all(0.0 <= v <= 1.0 for v in values):
+        normalized = True
+        normalized_max = 1.0
+    elif all(0.0 <= v <= 1000.0 for v in values):
+        normalized = True
+        normalized_max = 1000.0
+
+    def _to_box(order: str) -> tuple[int, int, int, int]:
+        if order == "yx":
+            y1, x1, y2, x2 = values
+        else:
+            x1, y1, x2, y2 = values
+        x1_i = _scale_coord(float(x1), width, normalized, normalized_max)
+        x2_i = _scale_coord(float(x2), width, normalized, normalized_max)
+        y1_i = _scale_coord(float(y1), height, normalized, normalized_max)
+        y2_i = _scale_coord(float(y2), height, normalized, normalized_max)
+        return x1_i, y1_i, x2_i, y2_i
+
+    for order in ("yx", "xy"):
+        x1_i, y1_i, x2_i, y2_i = _to_box(order)
+        if x2_i > x1_i and y2_i > y1_i:
+            return x1_i, y1_i, x2_i, y2_i
+    return None
+
+
+def _parse_box_mapping(box: dict, target_size: tuple[int, int]) -> tuple[int, int, int, int] | None:
+    width, height = target_size
+
+    def _normalized(values: list[float]) -> tuple[bool, float]:
+        if all(0.0 <= v <= 1.0 for v in values):
+            return True, 1.0
+        if all(0.0 <= v <= 1000.0 for v in values):
+            return True, 1000.0
+        return False, 1.0
+
+    for keys in (("x1", "y1", "x2", "y2"), ("xmin", "ymin", "xmax", "ymax"), ("left", "top", "right", "bottom")):
+        if all(k in box for k in keys):
+            vals = [float(box[k]) for k in keys]
+            normalized, normalized_max = _normalized(vals)
+            x1_i = _scale_coord(vals[0], width, normalized, normalized_max)
+            y1_i = _scale_coord(vals[1], height, normalized, normalized_max)
+            x2_i = _scale_coord(vals[2], width, normalized, normalized_max)
+            y2_i = _scale_coord(vals[3], height, normalized, normalized_max)
+            if x2_i > x1_i and y2_i > y1_i:
+                return x1_i, y1_i, x2_i, y2_i
+
+    if all(k in box for k in ("x", "y", "width", "height")):
+        x = float(box["x"])
+        y = float(box["y"])
+        w = float(box["width"])
+        h = float(box["height"])
+        normalized, normalized_max = _normalized([x, y, w, h])
+        x1_i = _scale_coord(x, width, normalized, normalized_max)
+        y1_i = _scale_coord(y, height, normalized, normalized_max)
+        x2_i = _scale_coord(x + w, width, normalized, normalized_max)
+        y2_i = _scale_coord(y + h, height, normalized, normalized_max)
+        if x2_i > x1_i and y2_i > y1_i:
+            return x1_i, y1_i, x2_i, y2_i
+
+    if "top_left" in box and "bottom_right" in box:
+        tl = box["top_left"]
+        br = box["bottom_right"]
+        if isinstance(tl, dict) and isinstance(br, dict):
+            return _parse_box_mapping(
+                {
+                    "x1": tl.get("x"),
+                    "y1": tl.get("y"),
+                    "x2": br.get("x"),
+                    "y2": br.get("y"),
+                },
+                target_size,
+            )
+    return None
+
+
+def _extract_box(item: dict, target_size: tuple[int, int]) -> tuple[int, int, int, int] | None:
+    for key in ("box_2d", "bbox", "bounding_box", "boundingBox", "box"):
+        if key in item:
+            value = item.get(key)
+            if isinstance(value, dict):
+                return _parse_box_mapping(value, target_size)
+            if isinstance(value, list):
+                return _parse_box_list([float(v) for v in value], target_size)
+    mask = item.get("mask")
+    if isinstance(mask, dict):
+        for key in ("box_2d", "bbox", "bounding_box", "boundingBox", "box"):
+            if key in mask:
+                value = mask.get(key)
+                if isinstance(value, dict):
+                    return _parse_box_mapping(value, target_size)
+                if isinstance(value, list):
+                    return _parse_box_list([float(v) for v in value], target_size)
+    return None
+
+
+def _parse_first_box(text: str) -> list[float] | None:
+    match = re.search(r"box_2d\s*:\s*\[([^\]]+)", text)
+    if not match:
+        return None
+    nums = re.findall(r"-?\d+\.?\d*", match.group(1))
+    if len(nums) < 4:
+        return None
+    return [float(n) for n in nums[:4]]
+
+
+def _parse_rle_from_text(text: str) -> tuple[list[int] | None, tuple[int, int] | None]:
+    size_match = re.search(r"size\s*:\s*\[([^\]]+)", text)
+    size_vals = None
+    if size_match:
+        size_nums = re.findall(r"\d+", size_match.group(1))
+        if len(size_nums) >= 2:
+            size_vals = (int(size_nums[0]), int(size_nums[1]))
+    counts_match = re.search(r"counts\s*:\s*\[([^\]]*)", text)
+    counts_vals: list[int] | None = None
+    if counts_match:
+        counts_nums = re.findall(r"\d+", counts_match.group(1))
+        counts_vals = [int(n) for n in counts_nums] if counts_nums else None
+    return counts_vals, size_vals
+
+
+def _parse_bits_from_text(text: str) -> str | None:
+    match = re.search(r"\"?bits\"?\s*:\s*\"?([01\s]+)", text, re.S)
+    if match:
+        return "".join(ch for ch in match.group(1) if ch in "01")
+    return None
+
+
+def _parse_size_from_text(text: str) -> tuple[int, int] | None:
+    size_match = re.search(r"\"?size\"?\s*:\s*\[([^\]]+)", text)
+    if not size_match:
+        return None
+    nums = re.findall(r"\d+", size_match.group(1))
+    if len(nums) >= 2:
+        return int(nums[0]), int(nums[1])
+    return None
+
+
+def _extract_base64_mask_from_text(text: str) -> bytes | None:
+    match = re.search(r"data:image/(?:png|jpeg|jpg);base64,([A-Za-z0-9+/=\s]+)", text)
+    if not match:
+        match = re.search(r"\"mask\"\\s*:\\s*\"([A-Za-z0-9+/=\s]+)\"", text, re.S)
+    if match:
+        raw = "".join(ch for ch in match.group(1) if ch.isalnum() or ch in "+/=")
+    else:
+        marker = None
+        for candidate in (
+            "data:image/png;base64,",
+            "data:image/jpeg;base64,",
+            "data:image/jpg;base64,",
+            "iVBOR",
+            "/9j/",
+        ):
+            idx = text.find(candidate)
+            if idx != -1:
+                marker = candidate
+                raw = text[idx + (len(candidate) if candidate.startswith("data:image") else 0) :]
+                break
+        else:
+            mask_idx = text.find("\"mask\"")
+            raw = text[mask_idx:] if mask_idx != -1 else text
+        raw = "".join(ch for ch in raw if ch.isalnum() or ch in "+/=")
+    if not raw:
+        return None
+    pad = (-len(raw)) % 4
+    if pad:
+        raw = raw + ("=" * pad)
+    try:
+        return base64.b64decode(raw, validate=False)
+    except Exception:
+        return None
+
+
+def segmentation_json_to_mask_image(
+    json_text: str,
+    target_size: tuple[int, int],
+    threshold: int = 1,
+) -> Image.Image:
+    if threshold < 0:
+        threshold = 0
+    if threshold > 255:
+        threshold = 255
+    items: list[dict] = []
+    try:
+        payload = _load_json_payload(json_text)
+        items = _extract_segmentation_items(payload)
+    except Exception:
+        items = []
+    if not items:
+        box_vals = _parse_first_box(json_text)
+        counts_vals, size_vals = _parse_rle_from_text(json_text)
+        if counts_vals and size_vals:
+            mask_img = _rle_to_mask(counts_vals, size_vals, order="row-major")
+            mask_img = mask_img.point(lambda p: 255 if p >= threshold else 0)
+            box = _parse_box_list(box_vals, target_size) if box_vals else None
+            if box:
+                x1, y1, x2, y2 = box
+                box_w = max(1, x2 - x1)
+                box_h = max(1, y2 - y1)
+                if mask_img.size != (box_w, box_h):
+                    mask_img = mask_img.resize((box_w, box_h), Image.NEAREST)
+                placed = Image.new("L", target_size, 0)
+                placed.paste(mask_img, (x1, y1))
+                return placed
+            if mask_img.size != target_size:
+                mask_img = ImageOps.fit(mask_img, target_size, Image.NEAREST, centering=(0.5, 0.5))
+            return mask_img
+        bits_text = _parse_bits_from_text(json_text)
+        size_vals = _parse_size_from_text(json_text)
+        if bits_text and size_vals:
+            mask_img = _bitstring_to_mask(bits_text, size_vals)
+            if mask_img is not None:
+                mask_img = mask_img.point(lambda p: 255 if p >= threshold else 0)
+                box = _parse_box_list(box_vals, target_size) if box_vals else None
+                if box:
+                    x1, y1, x2, y2 = box
+                    box_w = max(1, x2 - x1)
+                    box_h = max(1, y2 - y1)
+                    if mask_img.size != (box_w, box_h):
+                        mask_img = mask_img.resize((box_w, box_h), Image.NEAREST)
+                    placed = Image.new("L", target_size, 0)
+                    placed.paste(mask_img, (x1, y1))
+                    return placed
+                if mask_img.size != target_size:
+                    mask_img = ImageOps.fit(
+                        mask_img, target_size, Image.NEAREST, centering=(0.5, 0.5)
+                    )
+                return mask_img
+        raw_mask = _extract_base64_mask_from_text(json_text)
+        if raw_mask:
+            try:
+                with Image.open(io.BytesIO(raw_mask)) as mask_img:
+                    mask_img = ImageOps.exif_transpose(mask_img).convert("L")
+            except Exception:
+                mask_img = None
+            if mask_img is not None:
+                mask_img = mask_img.point(lambda p: 255 if p >= threshold else 0)
+                box = _parse_box_list(box_vals, target_size) if box_vals else None
+                if box:
+                    x1, y1, x2, y2 = box
+                    box_w = max(1, x2 - x1)
+                    box_h = max(1, y2 - y1)
+                    if mask_img.size != (box_w, box_h):
+                        mask_img = mask_img.resize((box_w, box_h), Image.NEAREST)
+                    placed = Image.new("L", target_size, 0)
+                    placed.paste(mask_img, (x1, y1))
+                    return placed
+                if mask_img.size != target_size:
+                    mask_img = ImageOps.fit(
+                        mask_img, target_size, Image.NEAREST, centering=(0.5, 0.5)
+                    )
+                return mask_img
+        raise ValueError("No mask items found in segmentation response.")
+    full_mask = Image.new("L", target_size, 0)
+    for item in items:
+        mask_info = item.get("mask") or item.get("segmentation") or item.get("mask_data")
+        mask_img = _coerce_mask_image(mask_info)
+        if mask_img is None:
+            mask_img = _coerce_rle_mask(item)
+        if mask_img is None:
+            continue
+        mask_img = mask_img.convert("L")
+        mask_img = mask_img.point(lambda p: 255 if p >= threshold else 0)
+        box = _extract_box(item, target_size)
+        if box:
+            x1, y1, x2, y2 = box
+            x1 = max(0, min(target_size[0], x1))
+            x2 = max(0, min(target_size[0], x2))
+            y1 = max(0, min(target_size[1], y1))
+            y2 = max(0, min(target_size[1], y2))
+            if x2 <= x1 or y2 <= y1:
+                continue
+            box_w = x2 - x1
+            box_h = y2 - y1
+            if mask_img.size != (box_w, box_h):
+                mask_img = mask_img.resize((box_w, box_h), Image.NEAREST)
+            placed = Image.new("L", target_size, 0)
+            placed.paste(mask_img, (x1, y1))
+            full_mask = ImageChops.lighter(full_mask, placed)
+        else:
+            if mask_img.size != target_size:
+                mask_img = ImageOps.fit(
+                    mask_img, target_size, Image.NEAREST, centering=(0.5, 0.5)
+                )
+            full_mask = ImageChops.lighter(full_mask, mask_img)
+    if full_mask.getextrema() == (0, 0):
+        raise ValueError("Segmentation mask was empty after parsing.")
+    return full_mask
 
 
 def pad_mask_bytes_to_size(

@@ -203,6 +203,26 @@ def build_parser() -> argparse.ArgumentParser:
         help="Threshold for converting SAM2 overlay to a binary mask.",
     )
     parser.add_argument(
+        "--sam2-local-model",
+        type=str,
+        help="Local SAM2 model id for Transformers (e.g. facebook/sam2.1-hiera-large).",
+    )
+    parser.add_argument(
+        "--sam2-target",
+        type=str,
+        help="SAM2 mask target: piping (default) or cushions.",
+    )
+    parser.add_argument(
+        "--sam2-vertex-endpoint",
+        type=str,
+        help="Vertex endpoint resource for SAM2 mask generation.",
+    )
+    parser.add_argument(
+        "--sam2-vertex-location",
+        type=str,
+        help="Vertex region for the SAM2 endpoint (overrides config/env).",
+    )
+    parser.add_argument(
         "--vertex-diagnose",
         action="store_true",
         help="Run a minimal Vertex image call and print resolved config.",
@@ -272,6 +292,41 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         help="Threshold for binarizing model-generated mask (0-255).",
     )
+    parser.add_argument(
+        "--segmentation-mask-pass",
+        action="store_true",
+        help="Generate a piping mask via Gemini segmentation (JSON masks).",
+    )
+    parser.add_argument(
+        "--segmentation-mask-model",
+        type=str,
+        help="Model ID for segmentation mask generation (e.g., gemini-2.5-flash).",
+    )
+    parser.add_argument(
+        "--segmentation-mask-threshold",
+        type=int,
+        help="Threshold for binarizing segmentation masks (0-255).",
+    )
+    parser.add_argument(
+        "--segmentation-max-output-tokens",
+        type=int,
+        help="Max output tokens for segmentation JSON responses.",
+    )
+    parser.add_argument(
+        "--mask-only",
+        action="store_true",
+        help="Generate mask only and skip edit/post processing.",
+    )
+    parser.add_argument(
+        "--cushion-mask-pass",
+        action="store_true",
+        help="Generate a cushion outline mask from the donor for the edit step.",
+    )
+    parser.add_argument(
+        "--no-cushion-mask-pass",
+        action="store_true",
+        help="Disable cushion outline mask pass even if enabled in env/config.",
+    )
     return parser
 
 
@@ -319,6 +374,7 @@ def _run_vertex_diagnose(config) -> None:
             prompt="Diagnostic: change piping color only.",
             donor_png=donor_bytes,
             color_ref_png=color_bytes,
+            piping_ref_pngs=None,
             mask_png=None,
             temperature=config.temperature,
             image_size=None,
@@ -358,6 +414,14 @@ def main() -> None:
         config.sam2_model = args.sam2_model
     if args.sam2_mask_threshold is not None:
         config.sam2_mask_threshold = args.sam2_mask_threshold
+    if args.sam2_local_model:
+        config.sam2_local_model = args.sam2_local_model
+    if args.sam2_target:
+        config.sam2_target = args.sam2_target
+    if args.sam2_vertex_endpoint:
+        config.sam2_vertex_endpoint = args.sam2_vertex_endpoint
+    if args.sam2_vertex_location:
+        config.sam2_vertex_location = args.sam2_vertex_location
     if args.auto_aspect_ratio:
         config.auto_aspect_ratio = True
     if args.vertex_diagnose:
@@ -447,14 +511,33 @@ def main() -> None:
         if args.model_mask_threshold is not None
         else config.model_mask_threshold
     )
+    segmentation_mask_pass = args.segmentation_mask_pass
+    cushion_mask_pass = args.cushion_mask_pass or config.cushion_mask_pass
+    if args.no_cushion_mask_pass:
+        cushion_mask_pass = False
+    segmentation_mask_model = (
+        args.segmentation_mask_model
+        if args.segmentation_mask_model is not None
+        else config.segmentation_mask_model
+    )
+    segmentation_mask_threshold = (
+        args.segmentation_mask_threshold
+        if args.segmentation_mask_threshold is not None
+        else config.segmentation_mask_threshold
+    )
+    segmentation_max_output_tokens = (
+        args.segmentation_max_output_tokens
+        if args.segmentation_max_output_tokens is not None
+        else config.segmentation_max_output_tokens
+    )
+    mask_only = args.mask_only
     mask_from_output = args.mask_from_output
     mask_from_output_threshold = (
         args.mask_from_output_threshold
         if args.mask_from_output_threshold is not None
         else 10
     )
-    if mask_from_output:
-        model_mask_pass = False
+    # Allow model mask pass alongside mask-from-output so we can gate post masks.
     run_pipeline(
         config,
         prompt_path=prompt_path,
@@ -490,6 +573,11 @@ def main() -> None:
         model_mask_pass=model_mask_pass,
         model_mask_prompt=model_mask_prompt,
         model_mask_threshold=model_mask_threshold,
+        segmentation_mask_pass=segmentation_mask_pass,
+        segmentation_mask_model=segmentation_mask_model,
+        segmentation_mask_threshold=segmentation_mask_threshold,
+        segmentation_response_mime_type=config.segmentation_response_mime_type,
+        segmentation_max_output_tokens=segmentation_max_output_tokens,
         mask_from_output=mask_from_output,
         mask_from_output_threshold=mask_from_output_threshold,
         generate_mask=generate_mask,
@@ -497,6 +585,12 @@ def main() -> None:
         sam2_model=args.sam2_model,
         sam2_space=args.sam2_space,
         sam2_mask_threshold=args.sam2_mask_threshold,
+        sam2_local_model=args.sam2_local_model,
+        sam2_target=args.sam2_target,
+        cushion_mask_pass=cushion_mask_pass,
+        sam2_vertex_endpoint=args.sam2_vertex_endpoint,
+        sam2_vertex_location=args.sam2_vertex_location,
+        mask_only=mask_only,
     )
 
 

@@ -6,7 +6,7 @@ Python tooling for piping-focused furniture edits via AI image APIs.
 
 - `assets/original/donor_image/`: primary product images to edit
 - `assets/original/color_reference/`: fabric/finish reference images
-- `assets/original/piping_ref_images/`: piping style reference images
+- `assets/original/piping_ref_highlighted/`: piping reference images with highlighted piping
 - `assets/processed/`: generated 4K PNGs derived from original TIFFs
 - `prompts/`: prompt templates
 - `output/`: generated results in a subfolder named same as product name

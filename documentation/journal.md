@@ -720,3 +720,10 @@ YYYY-MM-DD
 
 ### What we did
 - Restored aspect-ratio padding and aspect_ratio on the edit request.
+
+## 2026-02-02 (Mon) — Color tweak support
+- Summary: Added Pillow-based saturation/hue adjustments for final composites.
+- What we did:
+  - Added `FINAL_SATURATION` / `FINAL_HUE_SHIFT` config knobs with defaults 1.0 / 0.0 so we can nudge the final PNG’s color without touching the donor geometry.
+  - Implemented `adjust_image_color(...)` (HSV channel math) and run it just before saving the final result plus the preview, so the donor piping mask still governs where edits land.
+  - This keeps the cushions aligned with the donor while letting us dial in color saturation/hue as a post-processing safety net.

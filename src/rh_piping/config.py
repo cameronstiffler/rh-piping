@@ -69,6 +69,8 @@ class AppConfig:
     prompts_dir: Path = PROMPTS_DIR
     processed_dir: Path = PROCESSED_DIR
     masks_dir: Path = MASKS_DIR
+    final_saturation: float = 1.0
+    final_hue_shift: float = 0.0
 
 
 def _env_flag(name: str, default: bool = False) -> bool:
@@ -217,4 +219,6 @@ def load_config() -> AppConfig:
         post_mask_expand=post_mask_expand,
         donor_piping_mask_prompt=donor_piping_mask_prompt,
         donor_piping_mask_threshold=donor_piping_mask_threshold,
+        final_saturation=_env_float("FINAL_SATURATION", 1.0),
+        final_hue_shift=_env_float("FINAL_HUE_SHIFT", 0.0),
     )

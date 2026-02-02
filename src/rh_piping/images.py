@@ -1447,7 +1447,42 @@ def fit_output_to_donor(output_bytes: bytes, alpha_source: Path) -> tuple[bytes,
             "target_size": target_size,
             "original_size": original_size,
         }
-        return buffer.getvalue(), stats
+    return buffer.getvalue(), stats
+
+
+def adjust_image_color(
+    image_bytes: bytes,
+    saturation_scale: float = 1.0,
+    hue_shift: float = 0.0,
+) -> bytes:
+    if saturation_scale == 1.0 and hue_shift == 0.0:
+        return image_bytes
+    with Image.open(io.BytesIO(image_bytes)) as img:
+        img = ImageOps.exif_transpose(img)
+        has_alpha = "A" in img.getbands()
+        alpha = img.getchannel("A") if has_alpha else None
+        rgb = img.convert("RGB")
+        hsv = rgb.convert("HSV")
+        h, s, v = hsv.split()
+        if hue_shift:
+            shift = int(round((hue_shift / 360.0) * 255)) % 256
+            h = h.point(lambda x: (x + shift) % 256)
+        if saturation_scale != 1.0:
+            def scale_channel(val: int) -> int:
+                scaled = int(round(val * saturation_scale))
+                if scaled < 0:
+                    return 0
+                if scaled > 255:
+                    return 255
+                return scaled
+
+            s = s.point(scale_channel)
+        adjusted = Image.merge("HSV", (h, s, v)).convert("RGB")
+        if alpha is not None:
+            adjusted.putalpha(alpha)
+        buffer = io.BytesIO()
+        adjusted.save(buffer, format="PNG")
+        return buffer.getvalue()
 
 
 

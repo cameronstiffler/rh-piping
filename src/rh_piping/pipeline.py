@@ -46,6 +46,7 @@ from rh_piping.images import (
     load_mask_image,
     normalize_mask_bytes,
     normalize_mask_bytes_exact,
+    adjust_image_color,
     parse_hex_color,
     apply_donor_alpha,
     restore_rgb_under_alpha,
@@ -1731,6 +1732,18 @@ def run_pipeline(
                         output_bytes,
                         preview_bg_color,
                     )
+                if config.final_saturation != 1.0 or config.final_hue_shift != 0.0:
+                    output_bytes = adjust_image_color(
+                        output_bytes,
+                        saturation_scale=config.final_saturation,
+                        hue_shift=config.final_hue_shift,
+                    )
+                    if preview_bytes is not None:
+                        preview_bytes = adjust_image_color(
+                            preview_bytes,
+                            saturation_scale=config.final_saturation,
+                            hue_shift=config.final_hue_shift,
+                        )
                 ext = _sniff_image_extension(output_bytes)
                 if ext != ".png":
                     out_path = out_dir / f"{out_stem}{ext}"
@@ -1864,6 +1877,18 @@ def run_pipeline(
                     output_bytes,
                     preview_bg_color,
                 )
+            if config.final_saturation != 1.0 or config.final_hue_shift != 0.0:
+                output_bytes = adjust_image_color(
+                    output_bytes,
+                    saturation_scale=config.final_saturation,
+                    hue_shift=config.final_hue_shift,
+                )
+                if preview_bytes is not None:
+                    preview_bytes = adjust_image_color(
+                        preview_bytes,
+                        saturation_scale=config.final_saturation,
+                        hue_shift=config.final_hue_shift,
+                    )
             out_path.write_bytes(output_bytes)
             print(f" ✔ Saved -> {out_path}")
             if config.enforce_adobe_rgb:

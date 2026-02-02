@@ -593,3 +593,14 @@ YYYY-MM-DD
 
 ### What we did
 - Added `prompts/mask_pass/mask_prompt_MID-7_piping.md` to generate a white-on-black piping-only mask.
+
+---
+
+## 2026-02-02 (Mon)
+
+### Summary
+- Enabled model cushion mask + post-mask pass by default with auto-regeneration rules.
+
+### What we did
+- Model cushion mask auto-runs when the mask file is missing; `--model-mask-pass` now forces overwrite.
+- Defaulted POST_MASK_PASS to true in config/env example.

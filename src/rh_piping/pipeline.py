@@ -544,6 +544,7 @@ def run_pipeline(
     vertex_bg_max_bytes: int | None = None,
     vertex_bg_max_edge: int | None = None,
     model_mask_pass: bool = False,
+    force_model_mask: bool = False,
     model_mask_prompt: str | None = None,
     model_mask_threshold: int = 200,
     segmentation_mask_pass: bool = False,
@@ -773,6 +774,9 @@ def run_pipeline(
             f"({donor_meta.width}x{donor_meta.height}, {donor_meta.mode})"
         )
         out_dir = config.output_dir / job.product_name
+        mask_short_tag = _short_product_tag(job.product_name)
+        model_mask_out = out_dir / "masks" / f"{mask_short_tag}_{pid_label}_mask.png"
+        existing_model_mask = model_mask_out if model_mask_out.exists() else None
         donor_bbox, _ = content_bbox_from_path(job.donor_processed)
         aspect_ratio = aspect_ratio_for_size(donor_meta.width, donor_meta.height)
         api_aspect_ratio = config.aspect_ratio
@@ -802,6 +806,7 @@ def run_pipeline(
                 "requested_results": requested_results,
                 "results_per_donor": results,
                 "model_mask_pass": model_mask_pass,
+                "model_mask_force": force_model_mask,
                 "segmentation_mask_pass": segmentation_mask_pass,
                 "segmentation_mask_model": segmentation_mask_model
                 or config.segmentation_mask_model,
@@ -810,9 +815,12 @@ def run_pipeline(
         )
         mask_path = None
         if post_process and not no_mask:
-            mask_path = find_mask_for_product(config.masks_dir, job.product_name)
-            if mask_path is None:
-                mask_path = _select_recent_mask(config.masks_dir)
+            if model_mask_pass and not force_model_mask and existing_model_mask is not None:
+                mask_path = existing_model_mask
+            else:
+                mask_path = find_mask_for_product(config.masks_dir, job.product_name)
+                if mask_path is None:
+                    mask_path = _select_recent_mask(config.masks_dir)
 
         print("[job]")
         print(f" product={job.product_name}")
@@ -983,42 +991,107 @@ def run_pipeline(
             )
         model_mask_bytes = None
         if model_mask_pass:
-            if model_mask_prompt:
-                base_mask_prompt = model_mask_prompt
-            else:
-                base_mask_prompt = _load_mid_mask_prompt(config.prompts_dir, prompt_id)
-            strict_mask_size = True
-            if strict_mask_size:
-                target_w, target_h = donor_meta.width, donor_meta.height
-            else:
-                target_w, target_h = donor_model_size
-            mask_prompt = _format_mask_prompt(
-                base_mask_prompt,
-                mask_width=target_w,
-                mask_height=target_h,
-                donor_width=donor_meta.width,
-                donor_height=donor_meta.height,
-            )
-            print(" [mask] generating via model")
-            if strict_mask_size:
-                donor_mask_bytes, donor_mask_size = build_model_input(
-                    job.donor_processed,
-                    pad_aspect_ratio=None,
-                    background_color=None,
+            if existing_model_mask is not None and not force_model_mask:
+                mask_image = load_mask_image(
+                    existing_model_mask, (donor_meta.width, donor_meta.height)
                 )
+                mask_bytes = build_square_mask_input(
+                    mask_image,
+                    (donor_meta.width, donor_meta.height),
+                    donor_model_size,
+                )
+                model_mask_bytes = existing_model_mask.read_bytes()
+                print(f" [mask] using existing model cushion mask -> {existing_model_mask}")
             else:
-                donor_mask_bytes = donor_model_bytes
-                donor_mask_size = donor_model_size
-            _write_recent_file(
-                out_dir,
-                RECENT_SUBMITTED_MASK_DIR,
-                _recent_filename("model_donor", ".png", recent_tag_base),
-                donor_mask_bytes,
-            )
-            if strict_mask_size:
-                mask_bytes_donor = None
-                last_mask_exc: Exception | None = None
-                for attempt in range(1, MODEL_MASK_MAX_ATTEMPTS + 1):
+                if model_mask_prompt:
+                    base_mask_prompt = model_mask_prompt
+                else:
+                    base_mask_prompt = _load_mid_mask_prompt(config.prompts_dir, prompt_id)
+                strict_mask_size = True
+                if strict_mask_size:
+                    target_w, target_h = donor_meta.width, donor_meta.height
+                else:
+                    target_w, target_h = donor_model_size
+                mask_prompt = _format_mask_prompt(
+                    base_mask_prompt,
+                    mask_width=target_w,
+                    mask_height=target_h,
+                    donor_width=donor_meta.width,
+                    donor_height=donor_meta.height,
+                )
+                print(" [mask] generating via model")
+                if strict_mask_size:
+                    donor_mask_bytes, donor_mask_size = build_model_input(
+                        job.donor_processed,
+                        pad_aspect_ratio=None,
+                        background_color=None,
+                    )
+                else:
+                    donor_mask_bytes = donor_model_bytes
+                    donor_mask_size = donor_model_size
+                _write_recent_file(
+                    out_dir,
+                    RECENT_SUBMITTED_MASK_DIR,
+                    _recent_filename("model_donor", ".png", recent_tag_base),
+                    donor_mask_bytes,
+                )
+                if strict_mask_size:
+                    mask_bytes_donor = None
+                    last_mask_exc: Exception | None = None
+                    for attempt in range(1, MODEL_MASK_MAX_ATTEMPTS + 1):
+                        raw_mask = generate_piping_mask(
+                            client=client,
+                            model_name=config.model,
+                            use_vertex=config.use_vertex,
+                            prompt=mask_prompt,
+                            donor_png=donor_mask_bytes,
+                            piping_ref_pngs=piping_ref_bytes,
+                            image_size=None,
+                            aspect_ratio=None,
+                        )
+                        try:
+                            mask_bytes_donor = normalize_mask_bytes_exact(
+                                raw_mask,
+                                donor_mask_size,
+                                threshold=model_mask_threshold,
+                            )
+                            last_mask_exc = None
+                            break
+                        except ValueError as exc:
+                            last_mask_exc = exc
+                            with Image.open(io.BytesIO(raw_mask)) as raw_mask_img:
+                                raw_mask_img = ImageOps.exif_transpose(raw_mask_img)
+                                raw_w, raw_h = raw_mask_img.size
+                            tgt_w, tgt_h = donor_mask_size
+                            raw_ratio = raw_w / raw_h if raw_h else 0.0
+                            tgt_ratio = tgt_w / tgt_h if tgt_h else 0.0
+                            ratio_delta = abs(raw_ratio - tgt_ratio)
+                            if ratio_delta <= 0.01 and attempt == MODEL_MASK_MAX_ATTEMPTS:
+                                print(
+                                    " [mask] size mismatch; resizing to donor "
+                                    f"({raw_w}x{raw_h} -> {tgt_w}x{tgt_h})"
+                                )
+                                mask_bytes_donor = normalize_mask_bytes(
+                                    raw_mask,
+                                    donor_mask_size,
+                                    threshold=model_mask_threshold,
+                                )
+                                last_mask_exc = None
+                                break
+                            print(
+                                " [mask] size mismatch; retry "
+                                f"{attempt}/{MODEL_MASK_MAX_ATTEMPTS} ({exc})"
+                            )
+                    if mask_bytes_donor is None:
+                        raise RuntimeError(
+                            "Model mask did not return donor-sized output."
+                        ) from last_mask_exc
+                    mask_bytes_donor = clip_mask_bytes_to_alpha(
+                        mask_bytes_donor,
+                        donor_alpha,
+                        donor_mask_size,
+                    )
+                else:
                     raw_mask = generate_piping_mask(
                         client=client,
                         model_name=config.model,
@@ -1026,112 +1099,58 @@ def run_pipeline(
                         prompt=mask_prompt,
                         donor_png=donor_mask_bytes,
                         piping_ref_pngs=piping_ref_bytes,
-                        image_size=None,
-                        aspect_ratio=None,
+                        image_size=config.image_size,
+                        aspect_ratio=api_aspect_ratio,
                     )
-                    try:
-                        mask_bytes_donor = normalize_mask_bytes_exact(
-                            raw_mask,
-                            donor_mask_size,
-                            threshold=model_mask_threshold,
+                    mask_bytes_donor = normalize_mask_bytes(
+                        raw_mask,
+                        donor_mask_size,
+                        threshold=model_mask_threshold,
+                    )
+                    donor_alpha_model = pad_alpha_to_size(donor_alpha, donor_mask_size)
+                    mask_bytes_donor = clip_mask_bytes_to_alpha(
+                        mask_bytes_donor,
+                        donor_alpha_model,
+                        donor_mask_size,
+                    )
+                _write_recent_file(
+                    out_dir,
+                    RECENT_RETURNED_MASK_DIR,
+                    _recent_filename(
+                        "model_cushion_mask",
+                        ".png",
+                        recent_tag_base,
+                    ),
+                    mask_bytes_donor,
+                )
+                if strict_mask_size:
+                    out_dir = config.output_dir / job.product_name
+                    ensure_dir(out_dir)
+                    masks_dir = out_dir / "masks"
+                    ensure_dir(masks_dir)
+                    model_mask_out.write_bytes(mask_bytes_donor)
+                    print(f" [mask] saved -> {model_mask_out}")
+                    model_mask_bytes = mask_bytes_donor
+                    mask_bytes = pad_mask_bytes_to_size(mask_bytes_donor, donor_model_size)
+                    with Image.open(io.BytesIO(model_mask_bytes)) as model_mask_img:
+                        model_mask_img = ImageOps.exif_transpose(model_mask_img).convert("L")
+                        mask_hist = model_mask_img.histogram()
+                        mask_total = sum(mask_hist)
+                        mask_cov = (
+                            (mask_total - mask_hist[0]) / mask_total if mask_total else 0.0
                         )
-                        last_mask_exc = None
-                        break
-                    except ValueError as exc:
-                        last_mask_exc = exc
-                        with Image.open(io.BytesIO(raw_mask)) as raw_mask_img:
-                            raw_mask_img = ImageOps.exif_transpose(raw_mask_img)
-                            raw_w, raw_h = raw_mask_img.size
-                        tgt_w, tgt_h = donor_mask_size
-                        raw_ratio = raw_w / raw_h if raw_h else 0.0
-                        tgt_ratio = tgt_w / tgt_h if tgt_h else 0.0
-                        ratio_delta = abs(raw_ratio - tgt_ratio)
-                        if ratio_delta <= 0.01 and attempt == MODEL_MASK_MAX_ATTEMPTS:
-                            print(
-                                " [mask] size mismatch; resizing to donor "
-                                f"({raw_w}x{raw_h} -> {tgt_w}x{tgt_h})"
-                            )
-                            mask_bytes_donor = normalize_mask_bytes(
-                                raw_mask,
-                                donor_mask_size,
-                                threshold=model_mask_threshold,
-                            )
-                            last_mask_exc = None
-                            break
+                    if mask_cov > 0.0005:
+                        mask_image = model_mask_img.copy()
                         print(
-                            " [mask] size mismatch; retry "
-                            f"{attempt}/{MODEL_MASK_MAX_ATTEMPTS} ({exc})"
+                            f" [mask] model mask coverage {mask_cov:.4f}; using for post-process"
                         )
-                if mask_bytes_donor is None:
-                    raise RuntimeError(
-                        "Model mask did not return donor-sized output."
-                    ) from last_mask_exc
-                mask_bytes_donor = clip_mask_bytes_to_alpha(
-                    mask_bytes_donor,
-                    donor_alpha,
-                    donor_mask_size,
-                )
-            else:
-                raw_mask = generate_piping_mask(
-                    client=client,
-                    model_name=config.model,
-                    use_vertex=config.use_vertex,
-                    prompt=mask_prompt,
-                    donor_png=donor_mask_bytes,
-                    piping_ref_pngs=piping_ref_bytes,
-                    image_size=config.image_size,
-                    aspect_ratio=api_aspect_ratio,
-                )
-                mask_bytes_donor = normalize_mask_bytes(
-                    raw_mask,
-                    donor_mask_size,
-                    threshold=model_mask_threshold,
-                )
-                donor_alpha_model = pad_alpha_to_size(donor_alpha, donor_mask_size)
-                mask_bytes_donor = clip_mask_bytes_to_alpha(
-                    mask_bytes_donor,
-                    donor_alpha_model,
-                    donor_mask_size,
-                )
-            _write_recent_file(
-                out_dir,
-                RECENT_RETURNED_MASK_DIR,
-                _recent_filename(
-                    "model_cushion_mask",
-                    ".png",
-                    recent_tag_base,
-                ),
-                mask_bytes_donor,
-            )
-            if strict_mask_size:
-                out_dir = config.output_dir / job.product_name
-                ensure_dir(out_dir)
-                masks_dir = out_dir / "masks"
-                ensure_dir(masks_dir)
-                mask_out = masks_dir / f"{_short_product_tag(job.product_name)}_{pid_label}_mask.png"
-                mask_out.write_bytes(mask_bytes_donor)
-                print(f" [mask] saved -> {mask_out}")
-                model_mask_bytes = mask_bytes_donor
-                mask_bytes = pad_mask_bytes_to_size(mask_bytes_donor, donor_model_size)
-                with Image.open(io.BytesIO(model_mask_bytes)) as model_mask_img:
-                    model_mask_img = ImageOps.exif_transpose(model_mask_img).convert("L")
-                    mask_hist = model_mask_img.histogram()
-                    mask_total = sum(mask_hist)
-                    mask_cov = (
-                        (mask_total - mask_hist[0]) / mask_total if mask_total else 0.0
-                    )
-                if mask_cov > 0.0005:
-                    mask_image = model_mask_img.copy()
-                    print(
-                        f" [mask] model mask coverage {mask_cov:.4f}; using for post-process"
-                    )
+                    else:
+                        print(
+                            f" [mask] model mask coverage {mask_cov:.4f}; keeping existing mask"
+                        )
                 else:
-                    print(
-                        f" [mask] model mask coverage {mask_cov:.4f}; keeping existing mask"
-                    )
-            else:
-                model_mask_bytes = mask_bytes_donor
-                mask_bytes = mask_bytes_donor
+                    model_mask_bytes = mask_bytes_donor
+                    mask_bytes = mask_bytes_donor
 
         if mask_only:
             print("[mask-only] mask generated; skipping edit/post generation.")

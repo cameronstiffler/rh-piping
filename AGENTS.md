@@ -19,6 +19,7 @@ This file guides coding agents working in this repo. Keep it short and practical
 - **Do not use diff masks** or fall back to them.
 - Model cushion mask is the primary mask path (defines the cushion area).
 - Model cushion mask prompt is named `prompts/mask_pass/mask_prompt_MID-<PID>_cushion.md`.
+- Model cushion mask auto-generates if the output mask file is missing; `--model-mask-pass` forces regeneration/overwrite.
 - Piping mask from output (post-mask pass) must use `prompts/mask_pass/mask_prompt_MID-<PID>_piping.md`.
 - Calibration overlays are saved as `cal_mask_*.png` under `output/<product>/recent/returned/post/`.
 

@@ -219,12 +219,16 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--model-mask-pass",
-        action="store_true",
-        help="Generate a piping mask with the model before editing.",
+        action="store_const",
+        const=True,
+        default=None,
+        help="Generate a model cushion mask before editing (overwrites existing mask).",
     )
     parser.add_argument(
         "--no-model-mask-pass",
-        action="store_true",
+        action="store_const",
+        const=False,
+        default=None,
         help="Disable model mask pass even if enabled in config/env.",
     )
     parser.add_argument(
@@ -456,9 +460,15 @@ def main() -> None:
         if args.vertex_bg_max_edge is not None
         else config.vertex_bg_max_edge
     )
-    model_mask_pass = args.model_mask_pass or config.model_mask_pass
-    if args.no_model_mask_pass:
+    model_mask_pass: bool
+    force_model_mask = False
+    if args.model_mask_pass is False:
         model_mask_pass = False
+    elif args.model_mask_pass is True:
+        model_mask_pass = True
+        force_model_mask = True
+    else:
+        model_mask_pass = config.model_mask_pass
     model_mask_prompt = args.model_mask_prompt
     model_mask_threshold = (
         args.model_mask_threshold
@@ -539,6 +549,7 @@ def main() -> None:
         vertex_bg_max_bytes=vertex_bg_max_bytes,
         vertex_bg_max_edge=vertex_bg_max_edge,
         model_mask_pass=model_mask_pass,
+        force_model_mask=force_model_mask,
         model_mask_prompt=model_mask_prompt,
         model_mask_threshold=model_mask_threshold,
         segmentation_mask_pass=segmentation_mask_pass,

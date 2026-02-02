@@ -141,7 +141,7 @@ def load_config() -> AppConfig:
     adobe_rgb_icc = _env_str("ADOBE_RGB_ICC")
     enforce_dpi = _env_flag("ENFORCE_DPI", default=False)
     target_dpi = _env_int("TARGET_DPI") or 300
-    model_mask_pass = _env_flag("MODEL_MASK_PASS", default=False)
+    model_mask_pass = _env_flag("MODEL_MASK_PASS", default=True)
     model_mask_prompt = _env_str("MODEL_MASK_PROMPT")
     model_mask_threshold = _env_int("MODEL_MASK_THRESHOLD") or 200
     segmentation_mask_model = _env_str("SEGMENTATION_MASK_MODEL") or "gemini-2.5-flash"
@@ -151,7 +151,7 @@ def load_config() -> AppConfig:
     piping_ref_max = _env_int("PIPING_REF_MAX")
     if piping_ref_max is None:
         piping_ref_max = 4
-    post_mask_pass = _env_flag("POST_MASK_PASS", default=False)
+    post_mask_pass = _env_flag("POST_MASK_PASS", default=True)
     post_mask_prompt = _env_str("POST_MASK_PROMPT")
     post_mask_threshold = _env_int("POST_MASK_THRESHOLD")
     if post_mask_threshold is None:

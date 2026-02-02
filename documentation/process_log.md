@@ -69,3 +69,26 @@ Append new runs at the bottom.
 - Mask (used): `output/Provence_Sofa112in_NaturalWeave_prod34270121_F_CC/masks/ProvenceSo1bf4_PID-7_mask.png`
 - Output: `output/Provence_Sofa112in_NaturalWeave_prod34270121_F_CC/ProvenceSo1bf4_PID-7_gemini849_FM_R5.png`
 - Notes: Mask coverage was large (~0.57); wicker was not immutable under this mask.
+
+### 2026-02-02 (Mon) — PID-7 R50
+- Command: `python3 -m rh_piping --pid 7 --product "Provence_Sofa112in_NaturalWeave_prod34270121_F_CC" --raw-any-size --scale-to-donor`
+- Product: `Provence_Sofa112in_NaturalWeave_prod34270121_F_CC`
+- Donor (processed): `assets/processed/donor_image/Provence_Sofa112in_NaturalWeave_prod34270121_F_CC.png`
+- Prompt: `prompts/initial_prompt_PID-7.md`
+- Mask (used): `output/Provence_Sofa112in_NaturalWeave_prod34270121_F_CC/masks/ProvenceSo1bf4_PID-7_mask.png`
+- Output: `output/Provence_Sofa112in_NaturalWeave_prod34270121_F_CC/ProvenceSo1bf4_PID-7_gemini849_FM_R50.png`
+- Notes: Saved this result as the “known good” reference before implementing the padding guard; final edit was fit/scaled back from 1024×1024 to 4096×1204.
+
+### Guard plan
+- We’ll pad the donor input to a supported square aspect ratio before sending it to the API and record the padding values.
+- After the model returns an edit/mask, we’ll crop away that padding and resize back to the donor size, ensuring the output and masks stay aligned.
+- This ensures we still deliver 4096×1204 results even when the API prefers square canvases, and we can revert easily from the `pad-guard` branch if the new approach fails.
+
+### 2026-02-02 (Mon) — PID-7 R51 (pad guard)
+- Command: `python3 -m rh_piping --pid 7 --product "Provence_Sofa112in_NaturalWeave_prod34270121_F_CC" --raw-any-size --scale-to-donor`
+- Product: `Provence_Sofa112in_NaturalWeave_prod34270121_F_CC`
+- Donor (processed): `assets/processed/donor_image/Provence_Sofa112in_NaturalWeave_prod34270121_F_CC.png`
+- Prompt: `prompts/initial_prompt_PID-7.md`
+- Mask (used): `output/Provence_Sofa112in_NaturalWeave_prod34270121_F_CC/masks/ProvenceSo1bf4_PID-7_mask.png`
+- Output: `output/Provence_Sofa112in_NaturalWeave_prod34270121_F_CC/ProvenceSo1bf4_PID-7_gemini849_FM_R51.png`
+- Notes: Pad-first guard executed—donor input padded to 4096×4096 before the call and cropped back to 4096×1204 immediately after, keeping the edit aligned to the donor while still supporting Gemini’s square-output preference.

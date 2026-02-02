@@ -38,13 +38,14 @@ from rh_piping.images import (
     align_mask_bytes,
     clip_mask_bytes_to_alpha,
     composite_with_mask,
-    segmentation_json_to_mask_image,
-    normalize_mask_bytes,
-    normalize_mask_bytes_exact,
+    crop_padding_from_bytes,
+    pad_image_bytes,
     pad_alpha_to_size,
     pad_mask_bytes_to_size,
     scale_output_to_donor_width,
     load_mask_image,
+    normalize_mask_bytes,
+    normalize_mask_bytes_exact,
     parse_hex_color,
     apply_donor_alpha,
     restore_rgb_under_alpha,
@@ -908,6 +909,12 @@ def run_pipeline(
             pad_aspect_ratio=api_aspect_ratio,
             background_color=chroma_key_color,
         )
+        max_side = max(donor_model_size)
+        donor_api_bytes, donor_padding = pad_image_bytes(
+            donor_model_bytes,
+            target_size=(max_side, max_side),
+            background_color=(0, 0, 0, 0),
+        )
         with Image.open(job.donor_processed) as donor_alpha_img:
             donor_alpha_img = ImageOps.exif_transpose(donor_alpha_img)
             if "A" in donor_alpha_img.getbands():
@@ -926,11 +933,17 @@ def run_pipeline(
         model_cushion_mask_image = None
         donor_piping_mask_image = None
         donor_piping_mask_bytes = None
+        mask_api_bytes = None
         if mask_image is not None:
             mask_bytes = build_square_mask_input(
                 mask_image,
                 (donor_meta.width, donor_meta.height),
                 donor_model_size,
+            )
+            mask_api_bytes, _ = pad_image_bytes(
+                mask_bytes,
+                target_size=donor_padding.padded_size,
+                background_color=(0, 0, 0, 0),
             )
         if segmentation_mask_pass:
             seg_threshold = max(0, min(255, segmentation_mask_threshold))
@@ -1519,16 +1532,17 @@ def run_pipeline(
                     model_name=config.model,
                     use_vertex=config.use_vertex,
                     prompt=prompt_text,
-                    donor_png=donor_model_bytes,
+                    donor_png=donor_api_bytes,
                     color_ref_png=color_bytes,
                     piping_ref_pngs=piping_ref_bytes,
-                    mask_png=mask_bytes,
+                    mask_png=mask_api_bytes,
                     temperature=config.temperature,
                     image_size=edit_image_size,
                     aspect_ratio=api_aspect_ratio,
                     response_mime_type=config.response_mime_type,
                     image_output_mime_type=config.image_output_mime_type,
                 )
+                output_bytes = crop_padding_from_bytes(output_bytes, donor_padding)
                 out_w, out_h = _output_size_from_bytes(output_bytes)
                 if (out_w, out_h) != (donor_meta.width, donor_meta.height):
                     output_bytes, fit_stats = fit_output_to_donor(

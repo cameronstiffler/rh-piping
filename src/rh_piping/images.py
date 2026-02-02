@@ -159,6 +159,72 @@ def build_model_input(
     return source_bytes, target_size
 
 
+@dataclass
+class PaddingMetadata:
+    original_size: tuple[int, int]
+    padded_size: tuple[int, int]
+    padding: tuple[int, int, int, int]
+
+
+def pad_image_bytes(
+    image_bytes: bytes,
+    target_size: tuple[int, int] | None = None,
+    background_color: tuple[int, ...] = (0, 0, 0, 0),
+) -> tuple[bytes, PaddingMetadata]:
+    with Image.open(io.BytesIO(image_bytes)) as img:
+        img = ImageOps.exif_transpose(img)
+        original_size = img.size
+        if target_size is None:
+            side = max(original_size)
+            target_size = (side, side)
+        target_w, target_h = target_size
+        if target_w < original_size[0] or target_h < original_size[1]:
+            raise ValueError(
+                f"Target size {target_size} must be at least as large as {original_size}."
+            )
+        if original_size == target_size:
+            padding = (0, 0, 0, 0)
+            metadata = PaddingMetadata(original_size, target_size, padding)
+            return image_bytes, metadata
+        if img.mode != "RGBA":
+            img = img.convert("RGBA")
+        bg_color = background_color
+        if len(bg_color) == 3:
+            bg_color = (*bg_color, 0)
+        padded = Image.new("RGBA", target_size, bg_color)
+        pad_left = (target_w - original_size[0]) // 2
+        pad_top = (target_h - original_size[1]) // 2
+        pad_right = target_w - original_size[0] - pad_left
+        pad_bottom = target_h - original_size[1] - pad_top
+        padded.paste(img, (pad_left, pad_top))
+        buffer = io.BytesIO()
+        padded.save(buffer, format="PNG")
+        padding = (pad_left, pad_top, pad_right, pad_bottom)
+        metadata = PaddingMetadata(original_size, target_size, padding)
+        return buffer.getvalue(), metadata
+
+
+def crop_padding_from_bytes(
+    image_bytes: bytes, metadata: PaddingMetadata
+) -> bytes:
+    with Image.open(io.BytesIO(image_bytes)) as img:
+        img = ImageOps.exif_transpose(img)
+        padded_w, padded_h = metadata.padded_size
+        if img.size != (padded_w, padded_h):
+            img = img.resize((padded_w, padded_h), Image.LANCZOS)
+        left, top, right, bottom = metadata.padding
+        crop_box = (
+            left,
+            top,
+            padded_w - right,
+            padded_h - bottom,
+        )
+        cropped = img.crop(crop_box)
+        buffer = io.BytesIO()
+        cropped.save(buffer, format="PNG")
+        return buffer.getvalue()
+
+
 def apply_chroma_key(
     image_bytes: bytes,
     key_color: tuple[int, int, int],

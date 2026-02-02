@@ -583,3 +583,13 @@ YYYY-MM-DD
 - Renamed `prompts/mask_pass/mask_prompt_MID-7.md` to `prompts/mask_pass/mask_prompt_MID-7_cushion.md`.
 - Updated model mask outputs to `model_cushion_mask_*.png`.
 - Renamed calibration overlays to `cal_mask_*.png`.
+
+---
+
+## 2026-02-02 (Mon)
+
+### Summary
+- Added a dedicated piping mask prompt for MID-7.
+
+### What we did
+- Added `prompts/mask_pass/mask_prompt_MID-7_piping.md` to generate a white-on-black piping-only mask.

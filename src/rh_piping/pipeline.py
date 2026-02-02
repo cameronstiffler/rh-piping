@@ -1708,7 +1708,7 @@ def run_pipeline(
                             " [post] donor alpha + RGB restored "
                             f"(thr={chroma_key_restore_threshold})"
                         )
-                composite_mask_bytes = model_mask_bytes or donor_piping_mask_bytes
+                composite_mask_bytes = donor_piping_mask_bytes or model_mask_bytes
                 if composite_mask_bytes is not None:
                     aligned_bytes, _ = fit_output_to_donor(
                         output_bytes, job.donor_processed

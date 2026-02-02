@@ -92,3 +92,12 @@ Append new runs at the bottom.
 - Mask (used): `output/Provence_Sofa112in_NaturalWeave_prod34270121_F_CC/masks/ProvenceSo1bf4_PID-7_mask.png`
 - Output: `output/Provence_Sofa112in_NaturalWeave_prod34270121_F_CC/ProvenceSo1bf4_PID-7_gemini849_FM_R51.png`
 - Notes: Pad-first guard executed—donor input padded to 4096×4096 before the call and cropped back to 4096×1204 immediately after, keeping the edit aligned to the donor while still supporting Gemini’s square-output preference.
+
+### 2026-02-02 (Mon) — PID-7 R52 (donor piping composite)
+- Command: `python3 -m rh_piping --pid 7 --product "Provence_Sofa112in_NaturalWeave_prod34270121_F_CC" --raw-any-size --scale-to-donor`
+- Product: `Provence_Sofa112in_NaturalWeave_prod34270121_F_CC`
+- Donor (processed): `assets/processed/donor_image/Provence_Sofa112in_NaturalWeave_prod34270121_F_CC.png`
+- Prompt: `prompts/initial_prompt_PID-7.md`
+- Mask (used): `output/Provence_Sofa112in_NaturalWeave_prod34270121_F_CC/masks/ProvenceSo1bf4_PID-7_mask.png`
+- Output: `output/Provence_Sofa112in_NaturalWeave_prod34270121_F_CC/ProvenceSo1bf4_PID-7_gemini849_FM_R52.png`
+- Notes: Pad guard still active; donor piping mask now the default composite mask so cushion areas outside piping stay untouched while the donor mask defines where the pipes change.

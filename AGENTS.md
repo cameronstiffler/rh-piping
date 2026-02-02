@@ -17,12 +17,11 @@ This file guides coding agents working in this repo. Keep it short and practical
 - **Do not use SAM2** under any circumstance.
 - **Do not use or generate the old cushion-mask feature** (removed; unrelated to the model cushion mask). Do not reintroduce it.
 - **Do not use diff masks** or fall back to them.
-- Model cushion mask is the primary mask path (defines the cushion area).
-- Model cushion mask prompt is named `prompts/mask_pass/mask_prompt_MID-<PID>_cushion.md`.
-- Model cushion mask auto-generates if the output mask file is missing; `--model-mask-pass` forces regeneration/overwrite.
-- Donor piping mask is always generated from the donor using `prompts/mask_pass/mask_prompt_MID-<PID>_donor_piping.md` and saved as `output/<product>/masks/<short>_PID-<PID>_donor_piping_mask.png`.
-- The donor piping mask is for QA/reference only; the **model cushion mask** is used for edit and composite.
-- Do not generate or use the post-mask piping mask from model output; the donor piping mask is the only composite mask.
+- Model cushion mask defines the cushion/piping area and is used whenever building edit inputs; it may be regenerated via `--model-mask-pass`.
+- Model cushion mask prompts follow `prompts/mask_pass/mask_prompt_MID-<PID>_cushion.md` (fallbacks: `mask_prompt_MID-<PID>.md`, then MID-3).
+- Donor piping mask comes from `prompts/mask_pass/mask_prompt_MID-<PID>_donor_piping.md` and saves to `output/<product>/masks/<short>_PID-<PID>_donor_piping_mask.png`.
+- The donor piping mask is now the default composite mask (it is still QA/reference material, but we align and intersect it with the cushion mask before compositing).
+- Do not generate or use the post-mask piping mask from model output; donor piping mask + cushion mask remain the only masks used in the edit flow.
 - Calibration overlays are saved as `cal_mask_*.png` under `output/<product>/recent/returned/post/`.
 
 ## Results count

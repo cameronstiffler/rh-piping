@@ -604,3 +604,119 @@ YYYY-MM-DD
 ### What we did
 - Model cushion mask auto-runs when the mask file is missing; `--model-mask-pass` now forces overwrite.
 - Defaulted POST_MASK_PASS to true in config/env example.
+
+---
+
+## 2026-02-02 (Mon)
+
+### Summary
+- Constrained post-mask composites to the model cushion mask.
+- Fixed IoU calculation for piping mask similarity tests and continued iterations.
+
+### What we did
+- Intersected post-mask piping mask with the base cushion mask before compositing.
+- Added retry logic to post-mask generation.
+- Updated piping similarity scripts to count IoU correctly and log failures.
+
+---
+
+## 2026-02-02 (Mon)
+
+### Summary
+- Tightened the MID-7 piping mask prompt to keep the mask mostly black and constrained to cushion-area piping.
+
+---
+
+## 2026-02-02 (Mon)
+
+### Summary
+- Added an optional donor piping mask pass (pre-edit).
+
+### What we did
+- Added `prompts/mask_pass/mask_prompt_MID-7_donor_piping.md` for donor piping detection.
+- Added a donor piping mask pass (CLI/env) that saves `donor_piping_mask_*.png` and `*_donor_piping_mask.png`.
+- Intersects donor piping mask with the model cushion mask when available.
+
+---
+
+## 2026-02-02 (Mon)
+
+### Summary
+- Donor piping mask is now mandatory and used for editing/compositing.
+
+### What we did
+- Made the donor piping mask generation always-on (no pass toggle).
+- The donor piping mask is now the edit mask and composite mask.
+- Added a prompt note to constrain piping edits to the donor piping mask.
+
+---
+
+## 2026-02-02 (Mon)
+
+### Summary
+- Disabled post-mask piping generation; donor piping mask is the only composite mask.
+
+### What we did
+- Turned off the post-mask pass in the pipeline.
+- Updated docs to reflect donor piping mask usage for compositing.
+
+---
+
+## 2026-02-02 (Mon)
+
+### Summary
+- Ensured model outputs are fit to donor proportions before saving.
+
+### What we did
+- Added a pre-save fit step so `edit_raw_*.png` matches the donor size/aspect ratio.
+
+---
+
+## 2026-02-02 (Mon)
+
+### Summary
+- Substantially dilated the donor piping mask to make top piping show.
+
+### What we did
+- Added a donor piping mask dilation step (`DONOR_PIPING_MASK_EXPAND = 8`) before saving.
+
+---
+
+## 2026-02-02 (Mon)
+
+### Summary
+- Switched edit/composite back to the model cushion mask (donor piping mask is QA-only).
+
+### What we did
+- Removed donor piping mask from edit/composite usage; cushion mask now constrains edits.
+- Updated prompt language to reference the cushion mask.
+
+---
+
+## 2026-02-02 (Mon)
+
+### Summary
+- Guarded post-processing so the cushion mask is still applied even if --no-mask leaks in.
+
+### What we did
+- If a cushion mask exists during post, the pipeline now overrides no-mask and composites anyway.
+
+---
+
+## 2026-02-02 (Mon)
+
+### Summary
+- Forced edit inputs to use donor size (no 21:9 padding) to prevent raw model proportion drift.
+
+### What we did
+- Disabled aspect-ratio padding for edit inputs and cleared aspect_ratio in the edit request.
+
+---
+
+## 2026-02-02 (Mon)
+
+### Summary
+- Reverted the donor-size forced edit input change.
+
+### What we did
+- Restored aspect-ratio padding and aspect_ratio on the edit request.

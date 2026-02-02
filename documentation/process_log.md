@@ -3,7 +3,7 @@
 This log tracks the steps and artifacts used to produce each result image.
 Append new runs at the bottom.
 
-## Workflow (Model Mask Only)
+## Workflow (Model Cushion Mask + Donor Piping Mask)
 
 1) **Prepare donor**
    - Original donor: `assets/original/donor_image/<product>.tif`
@@ -17,24 +17,37 @@ Append new runs at the bottom.
    - Saved mask:
      - `output/<product>/masks/<short>_PID-<PID>_mask.png`
      - `output/<product>/recent/returned/mask/model_cushion_mask_*.png`
-   - Submitted to edit:
-     - `output/<product>/recent/submitted/edit/edit_mask_*.png`
+   - Usage:
+     - Used as the **edit mask** and **composite mask**.
+     - Also used to constrain the donor piping mask (intersection).
 
-4) **Submit edit request**
+4) **Donor piping mask (pre-edit, required)**
+   - Prompt: `prompts/mask_pass/mask_prompt_MID-<PID>_donor_piping.md`
+   - Saved mask:
+     - `output/<product>/masks/<short>_PID-<PID>_donor_piping_mask.png`
+     - `output/<product>/recent/returned/mask/donor_piping_mask_*.png`
+   - Submitted donor:
+     - `output/<product>/recent/submitted/mask/donor_piping_donor_*.png`
+   - Usage:
+     - Diagnostic/QA only (not used for edit/composite).
+
+5) **Submit edit request**
+   - Edit mask (padded): `output/<product>/recent/submitted/edit/edit_mask_*.png` (derived from model cushion mask)
    - Donor submitted: `output/<product>/recent/submitted/edit/edit_donor_*.png`
    - Color ref (processed): `assets/processed/color_reference/<name>.png`
    - Piping refs (processed): `assets/processed/piping_ref_highlighted/*.png`
 
-5) **Model output (raw)**
+6) **Model output (fit to donor proportions)**
    - `output/<product>/recent/returned/result/edit_raw_*.png`
+   - If the model returns a different size/aspect ratio, it is fit to the donor canvas before saving.
 
-6) **Optional: Post-mask piping mask (from output)**
-   - Prompt: `prompts/mask_pass/mask_prompt_MID-<PID>_piping.md` (fallback: `_post`)
-   - Saved mask: `output/<product>/recent/returned/mask/piping_mask_*.png`
+7) **Post-mask piping mask (from output) — disabled**
+   - We do not generate or use a piping mask from the edited output.
+   - The donor piping mask is used for compositing instead.
 
-7) **Post composite (final)**
+8) **Post composite (final)**
    - Final output: `output/<product>/<short>_PID-<PID>_<model>_F*_R<idx>.png`
-   - Optional calibration overlay (most recent mask painted red): `output/<product>/recent/returned/post/cal_mask_*.png`
+   - Optional calibration overlay (only when explicitly requested): `output/<product>/recent/returned/post/cal_mask_*.png`
 
 ## Run Log (Append Below)
 

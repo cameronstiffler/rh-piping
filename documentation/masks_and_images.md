@@ -70,7 +70,18 @@ All run artifacts are stored under:
   - Used for post composite (what part of the raw model output becomes visible on the donor).
   - Also used as the edit mask unless an alternate edit mask is explicitly chosen.
 
-### 3) Segmentation mask (Gemini segmentation)
+### 3) Donor piping mask (pre-edit, always-on)
+- What it is: A binary mask of the existing piping detected on the donor image before any edits. This is always generated.
+- Prompt file: `prompts/mask_pass/mask_prompt_MID-<PID>_donor_piping.md`.
+- Saved files:
+  - `output/<product>/masks/<short>_PID-<PID>_donor_piping_mask.png`
+  - `output/<product>/recent/returned/mask/donor_piping_mask_*.png`
+  - Submitted donor (mask input): `output/<product>/recent/submitted/mask/donor_piping_donor_*.png`
+- Usage:
+  - Diagnostic/QA and alignment checks.
+  - Not used for edit or composite (model cushion mask is used instead).
+
+### 4) Segmentation mask (Gemini segmentation)
 - What it is: A mask parsed from a segmentation response.
 - Prompt file: `prompts/mask_pass/mask_prompt_MID-<PID>_seg.md`.
 - Saved files:
@@ -80,16 +91,12 @@ All run artifacts are stored under:
 - Usage:
   - Used for edit mask and post composite.
 
-### 4) Post-mask pass (mask from output)
+### 5) Post-mask pass (mask from output) — disabled
 - What it is: A mask generated from the *edited output* using a piping-mask prompt.
-- Prompt file: `prompts/mask_pass/mask_prompt_MID-<PID>_piping.md` (fallback: `_post`).
-- Saved files:
-  - `output/<product>/recent/returned/mask/piping_mask_*.png`
-  - Calibration overlay: `output/<product>/recent/returned/post/cal_mask_*.png`
-- Usage:
-  - Used as the post composite mask when enabled.
+- Status: Disabled. We do not generate or use this mask for compositing.
+- Notes: The donor piping mask is the only composite mask.
 
-### 5) Calibration overlays
+### 6) Calibration overlays
 - What they are: Donor with mask painted red for visual vetting.
 - The overlay always reflects whichever mask was most recently generated or selected.
 - Saved files:

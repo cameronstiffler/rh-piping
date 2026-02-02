@@ -4,9 +4,9 @@ Core Subject: The pipes on the sofa upholstery from the Donor Image need to be f
 
 Lighting and Atmosphere: There is no need to recalculate lighting. We only want the piping to appearance to match the color of the swatch. Outside of the pipes, the rest of the Result Image must remain the same as the original Donor Image. The sofa lighting and shadows must remain identical to the Donor Image. The background must be a solid, flat white (#FFFFFF), fully opaque — no gradients, textures, or transparency. Keep the exact donor contact shadow under the sofa; mimic its shape, position, and softness.
 
-Strict Requirements: Everything about the sofa and background remains exactly like the Donor Image. Only the piping on the sofa upholstery may be changed. Only modify pixels where the mask is white; do not change anything outside the mask and do not infer seams beyond the mask.
+Strict Requirements: Everything about the sofa and background remains exactly like the Donor Image. Only the piping on the sofa upholstery may be changed. Only modify pixels where the cushion mask is white; do not change anything outside the mask and do not infer seams beyond the piping.
 Framing Requirement: Entire sofa fully visible in frame; no part of the sofa is cropped or cut off.
-Scale Requirement: Sofa scale matches the Donor Image exactly; the sofa’s pixel width and height match the Donor Image.
+Scale Requirement: Sofa scale matches the Sofa in the Donor Image exactly; the sofa’s pixel width and height match the sofa in the Donor Image.
 Width Alignment: Sofa spans the same horizontal extent as the Donor Image; left and right margins match the Donor Image.
 Canvas Flexibility: The output canvas may be taller than the Donor Image; any extra space is added only above and/or below the sofa.
 

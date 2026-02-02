@@ -11,7 +11,7 @@ import re
 import uuid
 from datetime import datetime, timezone
 
-from PIL import Image, ImageOps, ImageFilter
+from PIL import Image, ImageOps, ImageFilter, ImageChops
 
 from rh_piping.config import AppConfig
 from rh_piping.genai_client import (
@@ -70,7 +70,9 @@ RAW_FIT_MAX_ATTEMPTS = 12
 RAW_SCALE_MAX_ATTEMPTS = 12
 RAW_SCALE_TOLERANCE = 0.03
 MODEL_MASK_MAX_ATTEMPTS = 3
+POST_MASK_MAX_ATTEMPTS = 3
 MAX_FAILURES = 5
+DONOR_PIPING_MASK_EXPAND = 8
 PROMPT_PID_VALUE = re.compile(r"PID(?P<value>-?\d+)")
 RECENT_DIRNAME = "recent"
 RECENT_SUBMITTED_EDIT_DIR = "submitted/edit"
@@ -174,6 +176,16 @@ def _load_post_mask_prompt(
         prompt = _load_mid_mask_prompt(prompts_dir, prompt_id, suffix=suffix)
         if prompt:
             return prompt
+    return ""
+
+
+def _load_donor_piping_mask_prompt(
+    prompts_dir: Path,
+    prompt_id: str,
+) -> str:
+    prompt = _load_mid_mask_prompt(prompts_dir, prompt_id, suffix="_donor_piping")
+    if prompt:
+        return prompt
     return ""
 
 
@@ -430,6 +442,22 @@ def _build_mask_calibration_overlay(
     return buffer.getvalue()
 
 
+def _binary_mask_image(mask_img: Image.Image, target_size: tuple[int, int]) -> Image.Image:
+    if mask_img.size != target_size:
+        mask_img = ImageOps.fit(mask_img, target_size, Image.NEAREST, centering=(0.5, 0.5))
+    return mask_img.convert("L").point(lambda p: 255 if p > 0 else 0)
+
+
+def _intersect_mask_images(
+    mask_a: Image.Image,
+    mask_b: Image.Image,
+    target_size: tuple[int, int],
+) -> Image.Image:
+    a = _binary_mask_image(mask_a, target_size)
+    b = _binary_mask_image(mask_b, target_size)
+    return ImageChops.multiply(a, b).point(lambda p: 255 if p > 0 else 0)
+
+
 def _align_mask_to_bbox(
     mask_img: Image.Image,
     donor_bbox: tuple[int, int, int, int],
@@ -547,6 +575,8 @@ def run_pipeline(
     force_model_mask: bool = False,
     model_mask_prompt: str | None = None,
     model_mask_threshold: int = 200,
+    donor_piping_mask_prompt: str | None = None,
+    donor_piping_mask_threshold: int | None = None,
     segmentation_mask_pass: bool = False,
     segmentation_mask_model: str | None = None,
     segmentation_mask_threshold: int = 1,
@@ -587,6 +617,11 @@ def run_pipeline(
         vertex_bg_remove = False
     if post_mask_threshold is None:
         post_mask_threshold = model_mask_threshold
+    if post_mask_pass:
+        print("[info] post-mask pass disabled; composite uses donor piping mask instead.")
+    post_mask_pass = False
+    if donor_piping_mask_threshold is None:
+        donor_piping_mask_threshold = model_mask_threshold
     if segmentation_mask_pass and model_mask_pass:
         print("[info] segmentation mask pass enabled; disabling model mask pass.")
         model_mask_pass = False
@@ -703,6 +738,11 @@ def run_pipeline(
             f"flat color {chroma_key_label} (RGB {chroma_key_color[0]}, "
             f"{chroma_key_color[1]}, {chroma_key_color[2]}).\n"
         )
+    prompt_text = (
+        f"{prompt_text.rstrip()}\n"
+        "Mask Constraint: A cushion mask is provided. Restrict edits to the "
+        "cushion area and do not change anything outside the mask.\n"
+    )
     preview_bg_color = None
     if config.preview_bg_hex:
         preview_bg_color = parse_hex_color(config.preview_bg_hex)
@@ -779,11 +819,7 @@ def run_pipeline(
         existing_model_mask = model_mask_out if model_mask_out.exists() else None
         donor_bbox, _ = content_bbox_from_path(job.donor_processed)
         aspect_ratio = aspect_ratio_for_size(donor_meta.width, donor_meta.height)
-        api_aspect_ratio = config.aspect_ratio
-        if config.auto_aspect_ratio and not api_aspect_ratio:
-            api_aspect_ratio = _nearest_supported_aspect_ratio(
-                donor_meta.width, donor_meta.height
-            )
+        api_aspect_ratio = aspect_ratio
         recent_tag_base = _recent_tag(
             pid_label,
             model_tag_short,
@@ -807,6 +843,7 @@ def run_pipeline(
                 "results_per_donor": results,
                 "model_mask_pass": model_mask_pass,
                 "model_mask_force": force_model_mask,
+                "donor_piping_mask_pass": True,
                 "segmentation_mask_pass": segmentation_mask_pass,
                 "segmentation_mask_model": segmentation_mask_model
                 or config.segmentation_mask_model,
@@ -866,6 +903,9 @@ def run_pipeline(
             )
         color_bytes = selected_color_processed.read_bytes()
         mask_bytes = None
+        model_cushion_mask_image = None
+        donor_piping_mask_image = None
+        donor_piping_mask_bytes = None
         if mask_image is not None:
             mask_bytes = build_square_mask_input(
                 mask_image,
@@ -1000,6 +1040,7 @@ def run_pipeline(
                     (donor_meta.width, donor_meta.height),
                     donor_model_size,
                 )
+                model_cushion_mask_image = mask_image.copy()
                 model_mask_bytes = existing_model_mask.read_bytes()
                 print(f" [mask] using existing model cushion mask -> {existing_model_mask}")
             else:
@@ -1141,6 +1182,7 @@ def run_pipeline(
                         )
                     if mask_cov > 0.0005:
                         mask_image = model_mask_img.copy()
+                        model_cushion_mask_image = mask_image.copy()
                         print(
                             f" [mask] model mask coverage {mask_cov:.4f}; using for post-process"
                         )
@@ -1151,6 +1193,96 @@ def run_pipeline(
                 else:
                     model_mask_bytes = mask_bytes_donor
                     mask_bytes = mask_bytes_donor
+
+        base_prompt = donor_piping_mask_prompt
+        if base_prompt is None:
+            base_prompt = _load_donor_piping_mask_prompt(config.prompts_dir, prompt_id)
+        if not base_prompt:
+            raise RuntimeError(
+                "Donor piping mask prompt is empty. "
+                "Provide --donor-piping-mask-prompt or add "
+                "mask_prompt_MID-<PID>_donor_piping.md."
+            )
+        mask_prompt = _format_mask_prompt(
+            base_prompt,
+            mask_width=donor_meta.width,
+            mask_height=donor_meta.height,
+            donor_width=donor_meta.width,
+            donor_height=donor_meta.height,
+        )
+        print(" [donor-piping-mask] generating from donor")
+        donor_mask_bytes, donor_mask_size = build_model_input(
+            job.donor_processed,
+            pad_aspect_ratio=None,
+            background_color=None,
+        )
+        _write_recent_file(
+            out_dir,
+            RECENT_SUBMITTED_MASK_DIR,
+            _recent_filename("donor_piping_donor", ".png", recent_tag_base),
+            donor_mask_bytes,
+        )
+        raw_mask = generate_piping_mask(
+            client=client,
+            model_name=config.model,
+            use_vertex=config.use_vertex,
+            prompt=mask_prompt,
+            donor_png=donor_mask_bytes,
+            piping_ref_pngs=piping_ref_bytes,
+            image_size=None,
+            aspect_ratio=None,
+        )
+        try:
+            mask_bytes_donor = normalize_mask_bytes_exact(
+                raw_mask,
+                donor_mask_size,
+                threshold=donor_piping_mask_threshold,
+            )
+        except ValueError:
+            mask_bytes_donor = normalize_mask_bytes(
+                raw_mask,
+                donor_mask_size,
+                threshold=donor_piping_mask_threshold,
+            )
+        mask_bytes_donor = clip_mask_bytes_to_alpha(
+            mask_bytes_donor,
+            donor_alpha,
+            donor_mask_size,
+        )
+        with Image.open(io.BytesIO(mask_bytes_donor)) as mask_img:
+            mask_img = ImageOps.exif_transpose(mask_img).convert("L")
+        if model_mask_bytes is not None:
+            with Image.open(io.BytesIO(model_mask_bytes)) as model_mask_img:
+                model_mask_img = ImageOps.exif_transpose(model_mask_img).convert("L")
+            mask_img = _intersect_mask_images(
+                mask_img,
+                model_mask_img,
+                (donor_meta.width, donor_meta.height),
+            )
+            print(" [donor-piping-mask] intersected with model cushion mask")
+        if DONOR_PIPING_MASK_EXPAND > 0:
+            kernel = DONOR_PIPING_MASK_EXPAND * 2 + 1
+            mask_img = mask_img.filter(ImageFilter.MaxFilter(kernel))
+            mask_img = mask_img.point(lambda p: 255 if p > 0 else 0)
+            print(f" [donor-piping-mask] expanded by {DONOR_PIPING_MASK_EXPAND}px")
+        buffer = io.BytesIO()
+        mask_img.save(buffer, format="PNG")
+        donor_mask_png = buffer.getvalue()
+        _write_recent_file(
+            out_dir,
+            RECENT_RETURNED_MASK_DIR,
+            _recent_filename("donor_piping_mask", ".png", recent_tag_base),
+            donor_mask_png,
+        )
+        masks_dir = out_dir / "masks"
+        ensure_dir(masks_dir)
+        donor_piping_mask_out = (
+            masks_dir / f"{mask_short_tag}_{pid_label}_donor_piping_mask.png"
+        )
+        donor_piping_mask_out.write_bytes(donor_mask_png)
+        print(f" [donor-piping-mask] saved -> {donor_piping_mask_out}")
+        donor_piping_mask_image = mask_img
+        donor_piping_mask_bytes = donor_mask_png
 
         if mask_only:
             print("[mask-only] mask generated; skipping edit/post generation.")
@@ -1244,16 +1376,33 @@ def run_pipeline(
                     buffer = io.BytesIO()
                     aligned_img.save(buffer, format="PNG")
                     aligned_png = buffer.getvalue()
-                raw_mask = generate_piping_mask(
-                    client=client,
-                    model_name=config.model,
-                    use_vertex=config.use_vertex,
-                    prompt=mask_prompt,
-                    donor_png=aligned_png,
-                    piping_ref_pngs=piping_ref_bytes,
-                    image_size=None,
-                    aspect_ratio=None,
-                )
+                raw_mask = None
+                last_exc: Exception | None = None
+                for attempt in range(1, POST_MASK_MAX_ATTEMPTS + 1):
+                    try:
+                        raw_mask = generate_piping_mask(
+                            client=client,
+                            model_name=config.model,
+                            use_vertex=config.use_vertex,
+                            prompt=mask_prompt,
+                            donor_png=aligned_png,
+                            piping_ref_pngs=piping_ref_bytes,
+                            image_size=None,
+                            aspect_ratio=None,
+                        )
+                        last_exc = None
+                        break
+                    except Exception as exc:  # pylint: disable=broad-except
+                        last_exc = exc
+                        if attempt < POST_MASK_MAX_ATTEMPTS:
+                            print(
+                                " [post-mask] retry "
+                                f"{attempt}/{POST_MASK_MAX_ATTEMPTS} ({exc})"
+                            )
+                if raw_mask is None:
+                    raise RuntimeError(
+                        "Post-mask generation failed; no image returned."
+                    ) from last_exc
                 threshold = (
                     post_mask_threshold
                     if post_mask_threshold is not None
@@ -1359,6 +1508,17 @@ def run_pipeline(
                     response_mime_type=config.response_mime_type,
                     image_output_mime_type=config.image_output_mime_type,
                 )
+                out_w, out_h = _output_size_from_bytes(output_bytes)
+                if (out_w, out_h) != (donor_meta.width, donor_meta.height):
+                    output_bytes, fit_stats = fit_output_to_donor(
+                        output_bytes, job.donor_processed
+                    )
+                    target_w, target_h = fit_stats["target_size"]
+                    orig_w, orig_h = fit_stats["original_size"]
+                    print(
+                        " [post] fit output to donor canvas "
+                        f"{target_w}x{target_h} (original {orig_w}x{orig_h})"
+                    )
                 if vertex_bg_remove and config.use_vertex:
                     output_bytes = remove_background_vertex(
                         output_bytes,
@@ -1513,12 +1673,13 @@ def run_pipeline(
                             " [post] donor alpha + RGB restored "
                             f"(thr={chroma_key_restore_threshold})"
                         )
-                if model_mask_bytes is not None:
+                composite_mask_bytes = model_mask_bytes or donor_piping_mask_bytes
+                if composite_mask_bytes is not None:
                     aligned_bytes, _ = fit_output_to_donor(
                         output_bytes, job.donor_processed
                     )
                     donor_mask_bytes = align_mask_bytes(
-                        model_mask_bytes,
+                        composite_mask_bytes,
                         (donor_meta.width, donor_meta.height),
                         threshold=model_mask_threshold,
                     )
@@ -1527,7 +1688,7 @@ def run_pipeline(
                         job.donor_processed,
                         donor_mask_bytes,
                     )
-                    print(" [post] composited piping onto donor via model mask")
+                    print(" [post] composited piping onto donor via cushion mask")
                 raw_attempts = 0
                 preview_bytes = None
                 if preview_bg_color:
@@ -1597,14 +1758,25 @@ def run_pipeline(
                 continue
 
             if post_process:
+                base_mask_image = model_cushion_mask_image or mask_image
                 post_mask_image = _maybe_generate_post_piping_mask(
                     output_bytes, recent_tag_result
                 )
                 if post_mask_image is not None:
+                    if base_mask_image is not None:
+                        post_mask_image = _intersect_mask_images(
+                            post_mask_image,
+                            base_mask_image,
+                            (donor_meta.width, donor_meta.height),
+                        )
+                        print(" [post-mask] intersected with base mask")
                     mask_image = post_mask_image
                     output_bytes, _ = fit_output_to_donor(
                         output_bytes, job.donor_processed
                     )
+                if no_mask and (model_cushion_mask_image is not None or mask_image is not None):
+                    print(" [post] overriding --no-mask to preserve donor geometry")
+                    no_mask = False
                 if no_mask:
                     raise RuntimeError(
                         "Post-processing requires a mask to preserve donor geometry. "

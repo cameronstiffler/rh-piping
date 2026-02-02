@@ -62,6 +62,8 @@ class AppConfig:
     post_mask_threshold: int
     post_mask_shift_y: int
     post_mask_expand: int
+    donor_piping_mask_prompt: str | None
+    donor_piping_mask_threshold: int
     assets_dir: Path = ASSETS_DIR
     output_dir: Path = OUTPUT_DIR
     prompts_dir: Path = PROMPTS_DIR
@@ -162,6 +164,10 @@ def load_config() -> AppConfig:
     post_mask_expand = _env_int("POST_MASK_EXPAND")
     if post_mask_expand is None:
         post_mask_expand = 0
+    donor_piping_mask_prompt = _env_str("DONOR_PIPING_MASK_PROMPT")
+    donor_piping_mask_threshold = _env_int("DONOR_PIPING_MASK_THRESHOLD")
+    if donor_piping_mask_threshold is None:
+        donor_piping_mask_threshold = model_mask_threshold
 
     return AppConfig(
         model=model,
@@ -209,4 +215,6 @@ def load_config() -> AppConfig:
         post_mask_threshold=post_mask_threshold,
         post_mask_shift_y=post_mask_shift_y,
         post_mask_expand=post_mask_expand,
+        donor_piping_mask_prompt=donor_piping_mask_prompt,
+        donor_piping_mask_threshold=donor_piping_mask_threshold,
     )

@@ -242,6 +242,16 @@ def build_parser() -> argparse.ArgumentParser:
         help="Threshold for binarizing model-generated mask (0-255).",
     )
     parser.add_argument(
+        "--donor-piping-mask-prompt",
+        type=str,
+        help="Override prompt for donor piping mask generation.",
+    )
+    parser.add_argument(
+        "--donor-piping-mask-threshold",
+        type=int,
+        help="Threshold for binarizing donor piping masks (0-255).",
+    )
+    parser.add_argument(
         "--segmentation-mask-pass",
         action="store_true",
         help="Generate a piping mask via Gemini segmentation (JSON masks).",
@@ -475,6 +485,16 @@ def main() -> None:
         if args.model_mask_threshold is not None
         else config.model_mask_threshold
     )
+    donor_piping_mask_prompt = (
+        args.donor_piping_mask_prompt
+        if args.donor_piping_mask_prompt is not None
+        else config.donor_piping_mask_prompt
+    )
+    donor_piping_mask_threshold = (
+        args.donor_piping_mask_threshold
+        if args.donor_piping_mask_threshold is not None
+        else config.donor_piping_mask_threshold
+    )
     segmentation_mask_pass = args.segmentation_mask_pass
     segmentation_mask_model = (
         args.segmentation_mask_model
@@ -552,6 +572,8 @@ def main() -> None:
         force_model_mask=force_model_mask,
         model_mask_prompt=model_mask_prompt,
         model_mask_threshold=model_mask_threshold,
+        donor_piping_mask_prompt=donor_piping_mask_prompt,
+        donor_piping_mask_threshold=donor_piping_mask_threshold,
         segmentation_mask_pass=segmentation_mask_pass,
         segmentation_mask_model=segmentation_mask_model,
         segmentation_mask_threshold=segmentation_mask_threshold,

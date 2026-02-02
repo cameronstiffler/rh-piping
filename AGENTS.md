@@ -20,7 +20,9 @@ This file guides coding agents working in this repo. Keep it short and practical
 - Model cushion mask is the primary mask path (defines the cushion area).
 - Model cushion mask prompt is named `prompts/mask_pass/mask_prompt_MID-<PID>_cushion.md`.
 - Model cushion mask auto-generates if the output mask file is missing; `--model-mask-pass` forces regeneration/overwrite.
-- Piping mask from output (post-mask pass) must use `prompts/mask_pass/mask_prompt_MID-<PID>_piping.md`.
+- Donor piping mask is always generated from the donor using `prompts/mask_pass/mask_prompt_MID-<PID>_donor_piping.md` and saved as `output/<product>/masks/<short>_PID-<PID>_donor_piping_mask.png`.
+- The donor piping mask is for QA/reference only; the **model cushion mask** is used for edit and composite.
+- Do not generate or use the post-mask piping mask from model output; the donor piping mask is the only composite mask.
 - Calibration overlays are saved as `cal_mask_*.png` under `output/<product>/recent/returned/post/`.
 
 ## Results count

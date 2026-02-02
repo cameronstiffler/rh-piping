@@ -57,19 +57,16 @@ class AppConfig:
     segmentation_response_mime_type: str | None
     segmentation_max_output_tokens: int | None
     piping_ref_max: int
-    cushion_mask_pass: bool
+    post_mask_pass: bool
+    post_mask_prompt: str | None
+    post_mask_threshold: int
+    post_mask_shift_y: int
+    post_mask_expand: int
     assets_dir: Path = ASSETS_DIR
     output_dir: Path = OUTPUT_DIR
     prompts_dir: Path = PROMPTS_DIR
     processed_dir: Path = PROCESSED_DIR
     masks_dir: Path = MASKS_DIR
-    sam2_space: str = "lightly-ai/SAMv2-Mask-Generator"
-    sam2_model: str = "tiny"
-    sam2_mask_threshold: int = 10
-    sam2_local_model: str | None = None
-    sam2_target: str = "piping"
-    sam2_vertex_endpoint: str | None = None
-    sam2_vertex_location: str | None = None
 
 
 def _env_flag(name: str, default: bool = False) -> bool:
@@ -154,14 +151,17 @@ def load_config() -> AppConfig:
     piping_ref_max = _env_int("PIPING_REF_MAX")
     if piping_ref_max is None:
         piping_ref_max = 4
-    cushion_mask_pass = _env_flag("CUSHION_MASK_PASS", default=False)
-    sam2_space = os.getenv("SAM2_SPACE", "lightly-ai/SAMv2-Mask-Generator")
-    sam2_model = os.getenv("SAM2_MODEL", "tiny")
-    sam2_mask_threshold = _env_int("SAM2_MASK_THRESHOLD") or 10
-    sam2_local_model = _env_str("SAM2_LOCAL_MODEL")
-    sam2_target = os.getenv("SAM2_TARGET", "piping").strip() or "piping"
-    sam2_vertex_endpoint = _env_str("SAM2_VERTEX_ENDPOINT")
-    sam2_vertex_location = _env_str("SAM2_VERTEX_LOCATION")
+    post_mask_pass = _env_flag("POST_MASK_PASS", default=False)
+    post_mask_prompt = _env_str("POST_MASK_PROMPT")
+    post_mask_threshold = _env_int("POST_MASK_THRESHOLD")
+    if post_mask_threshold is None:
+        post_mask_threshold = model_mask_threshold
+    post_mask_shift_y = _env_int("POST_MASK_SHIFT_Y")
+    if post_mask_shift_y is None:
+        post_mask_shift_y = 0
+    post_mask_expand = _env_int("POST_MASK_EXPAND")
+    if post_mask_expand is None:
+        post_mask_expand = 0
 
     return AppConfig(
         model=model,
@@ -204,12 +204,9 @@ def load_config() -> AppConfig:
         segmentation_response_mime_type=segmentation_response_mime_type,
         segmentation_max_output_tokens=segmentation_max_output_tokens,
         piping_ref_max=piping_ref_max,
-        cushion_mask_pass=cushion_mask_pass,
-        sam2_space=sam2_space,
-        sam2_model=sam2_model,
-        sam2_mask_threshold=sam2_mask_threshold,
-        sam2_local_model=sam2_local_model,
-        sam2_target=sam2_target,
-        sam2_vertex_endpoint=sam2_vertex_endpoint,
-        sam2_vertex_location=sam2_vertex_location,
+        post_mask_pass=post_mask_pass,
+        post_mask_prompt=post_mask_prompt,
+        post_mask_threshold=post_mask_threshold,
+        post_mask_shift_y=post_mask_shift_y,
+        post_mask_expand=post_mask_expand,
     )

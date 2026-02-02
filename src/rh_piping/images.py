@@ -1398,48 +1398,6 @@ def load_mask_image(mask_path: Path, target_size: tuple[int, int]) -> Image.Imag
         return mask_img.convert("L")
 
 
-def diff_coverage_in_mask(
-    donor_rgb: Image.Image,
-    output_rgb: Image.Image,
-    mask: Image.Image,
-    threshold: int = 10,
-) -> float:
-    if output_rgb.size != donor_rgb.size:
-        output_rgb = ImageOps.fit(output_rgb, donor_rgb.size, Image.LANCZOS, centering=(0.5, 0.5))
-    mask = mask.convert("L")
-    if mask.size != donor_rgb.size:
-        mask = ImageOps.fit(mask, donor_rgb.size, Image.LANCZOS, centering=(0.5, 0.5))
-    diff = ImageChops.difference(donor_rgb, output_rgb).convert("L")
-    diff_mask = ImageChops.multiply(diff, mask.point(lambda p: 255 if p > 0 else 0))
-    bw = diff_mask.point(lambda p: 255 if p > threshold else 0)
-    hist = bw.histogram()
-    total = sum(hist)
-    covered = total - hist[0]
-    return covered / total if total else 0.0
-
-
-def build_output_diff_mask(
-    donor_rgb: Image.Image,
-    output_bytes: bytes,
-    threshold: int = 10,
-    alpha: Image.Image | None = None,
-) -> Image.Image:
-    with Image.open(io.BytesIO(output_bytes)) as out_img:
-        out_img = ImageOps.exif_transpose(out_img).convert("RGB")
-    if out_img.size != donor_rgb.size:
-        out_img = ImageOps.fit(out_img, donor_rgb.size, Image.LANCZOS, centering=(0.5, 0.5))
-    diff = ImageChops.difference(donor_rgb, out_img).convert("L")
-    mask = diff.point(lambda p: 255 if p > threshold else 0)
-    if alpha is not None:
-        if alpha.size != donor_rgb.size:
-            raise ValueError(
-                f"Alpha size {alpha.size} does not match donor {donor_rgb.size}."
-            )
-        alpha_bin = alpha.point(lambda p: 255 if p > 0 else 0)
-        mask = ImageChops.multiply(mask, alpha_bin)
-    return mask
-
-
 def chroma_delta_in_mask(
     donor_rgb: Image.Image,
     output_rgb: Image.Image,

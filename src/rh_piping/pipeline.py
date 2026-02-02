@@ -11,7 +11,7 @@ import re
 import uuid
 from datetime import datetime, timezone
 
-from PIL import Image, ImageChops, ImageOps
+from PIL import Image, ImageOps, ImageFilter
 
 from rh_piping.config import AppConfig
 from rh_piping.genai_client import (
@@ -48,16 +48,10 @@ from rh_piping.images import (
     parse_hex_color,
     apply_donor_alpha,
     restore_rgb_under_alpha,
-    build_output_diff_mask,
 )
 from rh_piping.io import ensure_dir, list_images
 from rh_piping.masks import (
     find_mask_for_product,
-    generate_cushion_body_mask,
-    generate_cushion_outline_mask,
-    generate_mask_from_local_sam2,
-    generate_mask_from_space,
-    generate_mask_from_vertex,
 )
 from rh_piping.prompts import prompt_id_from_path
 
@@ -152,16 +146,34 @@ def _load_mid_mask_prompt(
 ) -> str:
     mask_prompt_dir = prompts_dir / "mask_pass"
     mask_prompt_paths: list[Path] = []
+
+    def _append_candidates(pid_value: str) -> None:
+        candidates = [
+            f"mask_prompt_MID-{pid_value}_cushion{suffix}.md",
+            f"mask_prompt_MID-{pid_value}{suffix}.md",
+        ]
+        for name in candidates:
+            mask_prompt_paths.append(mask_prompt_dir / name)
+
     pid_match = PROMPT_PID_VALUE.search(prompt_id)
     if pid_match:
         pid_value = pid_match.group("value").lstrip("-")
-        mask_prompt_paths.append(
-            mask_prompt_dir / f"mask_prompt_MID-{pid_value}{suffix}.md"
-        )
-    mask_prompt_paths.append(mask_prompt_dir / f"mask_prompt_MID-3{suffix}.md")
+        _append_candidates(pid_value)
+    _append_candidates("3")
     for mask_prompt_path in mask_prompt_paths:
         if mask_prompt_path.exists():
             return mask_prompt_path.read_text(encoding="utf-8").strip()
+    return ""
+
+
+def _load_post_mask_prompt(
+    prompts_dir: Path,
+    prompt_id: str,
+) -> str:
+    for suffix in ("_piping", "_post"):
+        prompt = _load_mid_mask_prompt(prompts_dir, prompt_id, suffix=suffix)
+        if prompt:
+            return prompt
     return ""
 
 
@@ -378,6 +390,73 @@ def _write_recent_file(
     return dest_path
 
 
+def _select_recent_mask(mask_dir: Path) -> Path | None:
+    if not mask_dir.exists():
+        return None
+    candidates = [p for p in mask_dir.iterdir() if p.is_file()]
+    if not candidates:
+        return None
+    priority_prefixes = (
+        "piping_mask",
+        "model_cushion_mask",
+        "model_mask",
+        "segmentation_mask",
+    )
+    for prefix in priority_prefixes:
+        filtered = [p for p in candidates if p.name.startswith(prefix)]
+        if filtered:
+            return max(filtered, key=lambda p: p.stat().st_mtime)
+    return max(candidates, key=lambda p: p.stat().st_mtime)
+
+
+def _build_mask_calibration_overlay(
+    donor_path: Path,
+    mask_path: Path,
+) -> bytes:
+    with Image.open(donor_path) as donor_img:
+        donor_img = ImageOps.exif_transpose(donor_img).convert("RGBA")
+        donor_rgb = donor_img.convert("RGB")
+        donor_alpha = donor_img.getchannel("A")
+    with Image.open(mask_path) as mask_img:
+        mask_img = ImageOps.exif_transpose(mask_img).convert("L")
+    if mask_img.size != donor_rgb.size:
+        mask_img = ImageOps.fit(mask_img, donor_rgb.size, Image.NEAREST, centering=(0.5, 0.5))
+    red_layer = Image.new("RGB", donor_rgb.size, (255, 0, 0))
+    overlay = Image.composite(red_layer, donor_rgb, mask_img)
+    overlay = overlay.convert("RGBA")
+    overlay.putalpha(donor_alpha)
+    buffer = io.BytesIO()
+    overlay.save(buffer, format="PNG")
+    return buffer.getvalue()
+
+
+def _align_mask_to_bbox(
+    mask_img: Image.Image,
+    donor_bbox: tuple[int, int, int, int],
+    output_size: tuple[int, int],
+) -> Image.Image:
+    mx1, my1, mx2, my2 = mask_img.getbbox() or (0, 0, *mask_img.size)
+    dx1, dy1, dx2, dy2 = donor_bbox
+    mw = max(1, mx2 - mx1)
+    mh = max(1, my2 - my1)
+    dw = max(1, dx2 - dx1)
+    dh = max(1, dy2 - dy1)
+    sx = dw / mw
+    sy = dh / mh
+    tx = dx1 - sx * mx1
+    ty = dy1 - sy * my1
+    inv_sx = 1.0 / sx if sx else 1.0
+    inv_sy = 1.0 / sy if sy else 1.0
+    matrix = (inv_sx, 0.0, -tx * inv_sx, 0.0, inv_sy, -ty * inv_sy)
+    return mask_img.transform(
+        output_size,
+        Image.AFFINE,
+        matrix,
+        resample=Image.NEAREST,
+        fillcolor=0,
+    )
+
+
 def _write_recent_json(
     root_dir: Path,
     filename: str,
@@ -472,19 +551,14 @@ def run_pipeline(
     segmentation_mask_threshold: int = 1,
     segmentation_response_mime_type: str | None = None,
     segmentation_max_output_tokens: int | None = None,
-    cushion_mask_pass: bool = False,
-    mask_from_output: bool = False,
-    mask_from_output_threshold: int = 10,
-    generate_mask: bool = False,
-    regenerate_mask: bool = False,
-    sam2_model: str | None = None,
-    sam2_space: str | None = None,
-    sam2_mask_threshold: int | None = None,
-    sam2_local_model: str | None = None,
-    sam2_target: str | None = None,
-    sam2_vertex_endpoint: str | None = None,
-    sam2_vertex_location: str | None = None,
+    post_mask_pass: bool = False,
+    post_mask_prompt: str | None = None,
+    post_mask_threshold: int | None = None,
+    post_mask_shift_y: int = 0,
+    post_mask_expand: int = 0,
     mask_only: bool = False,
+    calibrate_mask: bool = False,
+    calibrate_mask_bbox: bool = False,
 ) -> list[PipingJob]:
     ensure_dir(config.output_dir)
     run_id = uuid.uuid4().hex
@@ -495,14 +569,10 @@ def run_pipeline(
         post_process = False
         no_mask = True
         preserve_luminance = False
-        generate_mask = False
-        regenerate_mask = False
         segmentation_mask_pass = False
     elif not post_process:
         no_mask = True
         preserve_luminance = False
-        generate_mask = False
-        regenerate_mask = False
         segmentation_mask_pass = False
     if chroma_key_hex:
         if post_process:
@@ -510,39 +580,15 @@ def run_pipeline(
         post_process = False
         no_mask = True
         preserve_luminance = False
-        generate_mask = False
-        regenerate_mask = False
         segmentation_mask_pass = False
         if vertex_bg_remove:
             print("[info] chroma key enabled; skipping Vertex background removal.")
         vertex_bg_remove = False
-    if segmentation_mask_pass and generate_mask:
-        print("[info] segmentation mask pass enabled; skipping SAM2 mask generation.")
-        generate_mask = False
-        regenerate_mask = False
+    if post_mask_threshold is None:
+        post_mask_threshold = model_mask_threshold
     if segmentation_mask_pass and model_mask_pass:
         print("[info] segmentation mask pass enabled; disabling model mask pass.")
         model_mask_pass = False
-    if cushion_mask_pass:
-        if model_mask_pass:
-            print("[info] cushion mask pass enabled; disabling model mask pass.")
-        if segmentation_mask_pass:
-            print("[info] cushion mask pass enabled; disabling segmentation mask pass.")
-        if generate_mask:
-            print("[info] cushion mask pass enabled; skipping SAM2 mask generation.")
-        model_mask_pass = False
-        segmentation_mask_pass = False
-        generate_mask = False
-        regenerate_mask = False
-        mask_from_output = True
-    if generate_mask and model_mask_pass:
-        print("[info] SAM2 mask enabled; disabling model mask pass.")
-        model_mask_pass = False
-    if mask_from_output and model_mask_pass:
-        print("[info] mask-from-output enabled; keeping model mask for edit and using diff mask for post.")
-    if mask_from_output and segmentation_mask_pass:
-        print("[info] mask-from-output enabled; keeping segmentation mask for edit and using diff mask for post.")
-
     if results < 1 or results > MAX_RESULTS:
         raise ValueError(f"--results must be between 1 and {MAX_RESULTS}")
     requested_results = results
@@ -556,6 +602,74 @@ def run_pipeline(
     if limit is not None:
         jobs = jobs[: max(limit, 0)]
 
+    prompt_id = prompt_id_from_path(prompt_path)
+    pid_label = _pid_label(prompt_id)
+    model_id = normalize_model_id(config.model, config.use_vertex)
+    model_tag = _sanitize_model_tag(model_id)
+    model_tag_short = _short_model_tag(model_tag)
+    if calibrate_mask:
+        for job in jobs:
+            donor_meta = convert_to_4k_png(job.donor_original, job.donor_processed)
+            out_dir = config.output_dir / job.product_name
+            recent_mask_dir = out_dir / RECENT_DIRNAME / RECENT_RETURNED_MASK_DIR
+            mask_path = _select_recent_mask(recent_mask_dir)
+            if mask_path is None:
+                masks_dir = out_dir / "masks"
+                mask_path = _select_recent_mask(masks_dir)
+            if mask_path is None:
+                mask_path = find_mask_for_product(config.masks_dir, job.product_name)
+            if mask_path is None or not mask_path.exists():
+                raise FileNotFoundError(
+                    f"No recent mask found for {job.product_name}."
+                )
+            if calibrate_mask_bbox:
+                with Image.open(mask_path) as mask_img:
+                    mask_img = ImageOps.exif_transpose(mask_img).convert("L")
+                    mask_img = mask_img.point(lambda p: 255 if p > 0 else 0)
+                donor_bbox, _ = content_bbox_from_path(job.donor_processed)
+                if donor_bbox is None:
+                    donor_bbox = (0, 0, donor_meta.width, donor_meta.height)
+                aligned = _align_mask_to_bbox(
+                    mask_img,
+                    donor_bbox,
+                    (donor_meta.width, donor_meta.height),
+                )
+                buffer = io.BytesIO()
+                aligned.save(buffer, format="PNG")
+                aligned_path = _write_recent_file(
+                    out_dir,
+                    RECENT_RETURNED_MASK_DIR,
+                    _recent_filename(
+                        "piping_mask_bbox",
+                        ".png",
+                        _recent_tag(pid_label, model_tag_short, run_stamp, run_id),
+                    ),
+                    buffer.getvalue(),
+                )
+                mask_path = aligned_path
+            recent_tag = _recent_tag(
+                pid_label,
+                model_tag_short,
+                run_stamp,
+                run_id,
+            )
+            overlay_bytes = _build_mask_calibration_overlay(
+                job.donor_processed,
+                mask_path,
+            )
+            filename = _recent_filename("cal_mask", ".png", recent_tag)
+            cal_path = _write_recent_file(
+                out_dir,
+                RECENT_RETURNED_POST_DIR,
+                filename,
+                overlay_bytes,
+            )
+            print(
+                f"[cal-mask] {job.product_name} "
+                f"mask={mask_path.name} -> {cal_path}"
+            )
+        return jobs
+
     color_dir = config.assets_dir / ORIGINAL_ROOT / COLOR_REF_DIRNAME
     color_refs = list_images(color_dir)
     if not color_refs:
@@ -568,15 +682,10 @@ def run_pipeline(
         else:
             piping_refs = piping_refs[: config.piping_ref_max]
 
-    prompt_id = prompt_id_from_path(prompt_path)
-    pid_label = _pid_label(prompt_id)
-    model_id = normalize_model_id(config.model, config.use_vertex)
     print("[connection]")
     print(f" model={model_id}")
     print(f" location={config.location}")
     print("[/connection]")
-    model_tag = _sanitize_model_tag(model_id)
-    model_tag_short = _short_model_tag(model_tag)
     chroma_key_color = None
     chroma_key_label = None
     if chroma_key_hex:
@@ -696,131 +805,14 @@ def run_pipeline(
                 "segmentation_mask_pass": segmentation_mask_pass,
                 "segmentation_mask_model": segmentation_mask_model
                 or config.segmentation_mask_model,
-                "sam2_space": sam2_space or config.sam2_space,
-                "sam2_model": sam2_model or config.sam2_model,
-                "sam2_local_model": sam2_local_model or config.sam2_local_model,
-                "sam2_target": sam2_target or config.sam2_target,
-                "cushion_mask_pass": cushion_mask_pass,
-                "sam2_vertex_endpoint": sam2_vertex_endpoint
-                or config.sam2_vertex_endpoint,
-                "sam2_vertex_location": sam2_vertex_location
-                or config.sam2_vertex_location
-                or config.location,
+                "post_mask_pass": post_mask_pass,
             },
         )
         mask_path = None
-        cushion_mask_image = None
         if post_process and not no_mask:
-            if cushion_mask_pass:
-                cushion_output = config.masks_dir / f"{job.product_name}_cushion.png"
-                print(f"[mask] generating cushion body mask -> {cushion_output}")
-                mask_path = generate_cushion_body_mask(
-                    image_path=job.donor_processed,
-                    output_path=cushion_output,
-                )
-                if mask_path.exists():
-                    _write_recent_file(
-                        out_dir,
-                        RECENT_RETURNED_MASK_DIR,
-                        _recent_filename("cushion_mask", ".png", recent_tag_base),
-                        mask_path.read_bytes(),
-                    )
-                cushion_mask_image = load_mask_image(
-                    mask_path,
-                    (donor_meta.width, donor_meta.height),
-                )
-            else:
-                mask_path = find_mask_for_product(config.masks_dir, job.product_name)
-                if regenerate_mask:
-                    mask_path = None
-                if generate_mask and mask_path is None:
-                    requested_threshold = (
-                        sam2_mask_threshold
-                        if sam2_mask_threshold is not None
-                        else config.sam2_mask_threshold
-                    )
-                    mask_output = config.masks_dir / f"{job.product_name}.png"
-                    requested_vertex_endpoint = (
-                        sam2_vertex_endpoint or config.sam2_vertex_endpoint
-                    )
-                    requested_vertex_location = (
-                        sam2_vertex_location
-                        or config.sam2_vertex_location
-                        or config.location
-                    )
-                    requested_local_model = sam2_local_model or config.sam2_local_model
-                    requested_target = sam2_target or config.sam2_target
-                    if requested_vertex_endpoint:
-                        print(
-                            "[mask] generating via SAM2 Vertex -> "
-                            f"{mask_output}"
-                        )
-                        print(
-                            " [mask] vertex_endpoint="
-                            f"{requested_vertex_endpoint} "
-                            f"location={requested_vertex_location}"
-                        )
-                        _write_recent_file(
-                            out_dir,
-                            RECENT_SUBMITTED_MASK_DIR,
-                            _recent_filename("sam2_vertex_donor", ".png", recent_tag_base),
-                            job.donor_processed.read_bytes(),
-                        )
-                        mask_path = generate_mask_from_vertex(
-                            image_path=job.donor_processed,
-                            output_path=mask_output,
-                            endpoint=requested_vertex_endpoint,
-                            location=requested_vertex_location,
-                            project=config.project,
-                            threshold=requested_threshold,
-                        )
-                    elif requested_local_model:
-                        print(
-                            "[mask] generating via local SAM2 "
-                            f"({requested_local_model}) -> {mask_output}"
-                        )
-                        if requested_target:
-                            print(f" [mask] local target={requested_target}")
-                        _write_recent_file(
-                            out_dir,
-                            RECENT_SUBMITTED_MASK_DIR,
-                            _recent_filename("sam2_local_donor", ".png", recent_tag_base),
-                            job.donor_processed.read_bytes(),
-                        )
-                        mask_path = generate_mask_from_local_sam2(
-                            image_path=job.donor_processed,
-                            output_path=mask_output,
-                            model_id=requested_local_model,
-                            threshold=requested_threshold,
-                            target=requested_target,
-                        )
-                    else:
-                        requested_model = sam2_model or config.sam2_model
-                        requested_space = sam2_space or config.sam2_space
-                        print(
-                            f"[mask] generating via SAM2 ({requested_model}) -> "
-                            f"{mask_output}"
-                        )
-                        _write_recent_file(
-                            out_dir,
-                            RECENT_SUBMITTED_MASK_DIR,
-                            _recent_filename("sam2_donor", ".png", recent_tag_base),
-                            job.donor_processed.read_bytes(),
-                        )
-                        mask_path = generate_mask_from_space(
-                            image_path=job.donor_processed,
-                            output_path=mask_output,
-                            space=requested_space,
-                            model=requested_model,
-                            threshold=requested_threshold,
-                        )
-                if mask_path.exists():
-                    _write_recent_file(
-                        out_dir,
-                        RECENT_RETURNED_MASK_DIR,
-                        _recent_filename("sam2_mask", ".png", recent_tag_base),
-                        mask_path.read_bytes(),
-                    )
+            mask_path = find_mask_for_product(config.masks_dir, job.product_name)
+            if mask_path is None:
+                mask_path = _select_recent_mask(config.masks_dir)
 
         print("[job]")
         print(f" product={job.product_name}")
@@ -841,9 +833,7 @@ def run_pipeline(
         print("[/job]")
 
         mask_image = None
-        if cushion_mask_image is not None:
-            mask_image = cushion_mask_image
-        elif mask_path and not no_mask:
+        if mask_path and not no_mask:
             mask_image = load_mask_image(
                 mask_path, (donor_meta.width, donor_meta.height)
             )
@@ -986,8 +976,6 @@ def run_pipeline(
                 if mask_cov <= 0.0001:
                     raise RuntimeError("Segmentation mask coverage too low.")
                 mask_image = seg_mask_img.copy()
-            if mask_image is not None:
-                cushion_mask_image = mask_image.copy()
             mask_bytes = build_square_mask_input(
                 mask_image,
                 (donor_meta.width, donor_meta.height),
@@ -1109,7 +1097,7 @@ def run_pipeline(
                 out_dir,
                 RECENT_RETURNED_MASK_DIR,
                 _recent_filename(
-                    "model_mask",
+                    "model_cushion_mask",
                     ".png",
                     recent_tag_base,
                 ),
@@ -1137,8 +1125,6 @@ def run_pipeline(
                     print(
                         f" [mask] model mask coverage {mask_cov:.4f}; using for post-process"
                     )
-                    if mask_from_output:
-                        cushion_mask_image = model_mask_img.copy()
                 else:
                     print(
                         f" [mask] model mask coverage {mask_cov:.4f}; keeping existing mask"
@@ -1208,6 +1194,106 @@ def run_pipeline(
         raw_attempts = 0
         fit_attempts = 0
         scale_attempts = 0
+        def _maybe_generate_post_piping_mask(
+            final_bytes: bytes,
+            recent_tag: str,
+        ) -> Image.Image | None:
+            if not post_mask_pass:
+                return None
+            base_prompt = post_mask_prompt
+            if base_prompt is None:
+                base_prompt = _load_post_mask_prompt(config.prompts_dir, prompt_id)
+            if not base_prompt:
+                raise RuntimeError(
+                    "Post-mask pass enabled but prompt is empty. "
+                    "Provide --post-mask-prompt or add a MID _piping prompt file "
+                    "(fallback: MID _post)."
+                )
+            mask_prompt = _format_mask_prompt(
+                base_prompt,
+                mask_width=donor_meta.width,
+                mask_height=donor_meta.height,
+                donor_width=donor_meta.width,
+                donor_height=donor_meta.height,
+            )
+            try:
+                aligned_bytes, _ = fit_output_to_donor(
+                    final_bytes, job.donor_processed
+                )
+                with Image.open(io.BytesIO(aligned_bytes)) as aligned_img:
+                    aligned_img = ImageOps.exif_transpose(aligned_img).convert("RGB")
+                    buffer = io.BytesIO()
+                    aligned_img.save(buffer, format="PNG")
+                    aligned_png = buffer.getvalue()
+                raw_mask = generate_piping_mask(
+                    client=client,
+                    model_name=config.model,
+                    use_vertex=config.use_vertex,
+                    prompt=mask_prompt,
+                    donor_png=aligned_png,
+                    piping_ref_pngs=piping_ref_bytes,
+                    image_size=None,
+                    aspect_ratio=None,
+                )
+                threshold = (
+                    post_mask_threshold
+                    if post_mask_threshold is not None
+                    else model_mask_threshold
+                )
+                try:
+                    mask_bytes_local = normalize_mask_bytes_exact(
+                        raw_mask,
+                        (donor_meta.width, donor_meta.height),
+                        threshold=threshold,
+                    )
+                except ValueError:
+                    mask_bytes_local = normalize_mask_bytes(
+                        raw_mask,
+                        (donor_meta.width, donor_meta.height),
+                        threshold=threshold,
+                    )
+                with Image.open(io.BytesIO(mask_bytes_local)) as mask_img:
+                    mask_img = ImageOps.exif_transpose(mask_img).convert("L")
+                if post_mask_shift_y:
+                    shifted = Image.new("L", mask_img.size, 0)
+                    if post_mask_shift_y > 0:
+                        src = (0, 0, mask_img.size[0], mask_img.size[1] - post_mask_shift_y)
+                        shifted.paste(mask_img.crop(src), (0, post_mask_shift_y))
+                    else:
+                        dy = abs(post_mask_shift_y)
+                        src = (0, dy, mask_img.size[0], mask_img.size[1])
+                        shifted.paste(mask_img.crop(src), (0, 0))
+                    mask_img = shifted
+                    print(f" [post-mask] applied shift_y={post_mask_shift_y}")
+                if post_mask_expand:
+                    kernel = max(1, int(post_mask_expand)) * 2 + 1
+                    mask_img = mask_img.filter(ImageFilter.MaxFilter(kernel))
+                    mask_img = mask_img.point(lambda p: 255 if p > 0 else 0)
+                    print(f" [post-mask] expanded by {post_mask_expand}px")
+                buffer = io.BytesIO()
+                mask_img.save(buffer, format="PNG")
+                mask_dest = _write_recent_file(
+                    out_dir,
+                    RECENT_RETURNED_MASK_DIR,
+                    _recent_filename("piping_mask", ".png", recent_tag),
+                    buffer.getvalue(),
+                )
+                print(" [post-mask] saved piping mask from output")
+                cal_bytes = _build_mask_calibration_overlay(
+                    job.donor_processed,
+                    mask_dest,
+                )
+                cal_name = _recent_filename("cal_mask", ".png", recent_tag)
+                _write_recent_file(
+                    out_dir,
+                    RECENT_RETURNED_POST_DIR,
+                    cal_name,
+                    cal_bytes,
+                )
+                print(" [post-mask] saved cal_mask overlay")
+                return mask_img
+            except Exception as exc:  # pylint: disable=broad-except
+                raise RuntimeError(f"Post-mask pass failed: {exc}") from exc
         while generated < results:
             out_stem = f"{stem_prefix}{result_index}"
             out_path = out_dir / f"{out_stem}.png"
@@ -1309,6 +1395,7 @@ def run_pipeline(
                 else:
                     print(" [post] donor alpha was fully opaque; saved output with alpha channel")
                 print(" [post] fit-only; saved output")
+                _maybe_generate_post_piping_mask(output_bytes, recent_tag_result)
                 out_path.write_bytes(output_bytes)
                 _write_recent_file(
                     out_dir,
@@ -1432,6 +1519,7 @@ def run_pipeline(
                 ext = _sniff_image_extension(output_bytes)
                 if ext != ".png":
                     out_path = out_dir / f"{out_stem}{ext}"
+                _maybe_generate_post_piping_mask(output_bytes, recent_tag_result)
                 out_path.write_bytes(output_bytes)
                 if enforce_raw_size:
                     print(" [post] disabled; saved raw model output (size matches donor)")
@@ -1490,23 +1578,14 @@ def run_pipeline(
                 continue
 
             if post_process:
-                if mask_from_output:
-                    with Image.open(job.donor_processed) as donor_img:
-                        donor_img = ImageOps.exif_transpose(donor_img)
-                        donor_rgb = donor_img.convert("RGB")
-                        alpha_channel = (
-                            donor_img.getchannel("A") if "A" in donor_img.getbands() else None
-                        )
-                    mask_image = build_output_diff_mask(
-                        donor_rgb,
-                        output_bytes,
-                        threshold=mask_from_output_threshold,
-                        alpha=alpha_channel,
+                post_mask_image = _maybe_generate_post_piping_mask(
+                    output_bytes, recent_tag_result
+                )
+                if post_mask_image is not None:
+                    mask_image = post_mask_image
+                    output_bytes, _ = fit_output_to_donor(
+                        output_bytes, job.donor_processed
                     )
-                    if cushion_mask_image is not None:
-                        mask_image = ImageChops.multiply(
-                            mask_image, cushion_mask_image.convert("L")
-                        )
                 if no_mask:
                     raise RuntimeError(
                         "Post-processing requires a mask to preserve donor geometry. "

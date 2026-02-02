@@ -178,51 +178,6 @@ def build_parser() -> argparse.ArgumentParser:
         help="Directory containing optional per-product mask files.",
     )
     parser.add_argument(
-        "--generate-mask",
-        action="store_true",
-        help="Generate a piping mask via the SAM2 space when missing.",
-    )
-    parser.add_argument(
-        "--regenerate-mask",
-        action="store_true",
-        help="Force regeneration of the piping mask even if one exists.",
-    )
-    parser.add_argument(
-        "--sam2-space",
-        type=str,
-        help="Hugging Face Space ID for SAM2 mask generation.",
-    )
-    parser.add_argument(
-        "--sam2-model",
-        type=str,
-        help="SAM2 model checkpoint (tiny, small, base_plus, large).",
-    )
-    parser.add_argument(
-        "--sam2-mask-threshold",
-        type=int,
-        help="Threshold for converting SAM2 overlay to a binary mask.",
-    )
-    parser.add_argument(
-        "--sam2-local-model",
-        type=str,
-        help="Local SAM2 model id for Transformers (e.g. facebook/sam2.1-hiera-large).",
-    )
-    parser.add_argument(
-        "--sam2-target",
-        type=str,
-        help="SAM2 mask target: piping (default) or cushions.",
-    )
-    parser.add_argument(
-        "--sam2-vertex-endpoint",
-        type=str,
-        help="Vertex endpoint resource for SAM2 mask generation.",
-    )
-    parser.add_argument(
-        "--sam2-vertex-location",
-        type=str,
-        help="Vertex region for the SAM2 endpoint (overrides config/env).",
-    )
-    parser.add_argument(
         "--vertex-diagnose",
         action="store_true",
         help="Run a minimal Vertex image call and print resolved config.",
@@ -273,16 +228,6 @@ def build_parser() -> argparse.ArgumentParser:
         help="Disable model mask pass even if enabled in config/env.",
     )
     parser.add_argument(
-        "--mask-from-output",
-        action="store_true",
-        help="Build the post-process mask from the model output (diff vs donor).",
-    )
-    parser.add_argument(
-        "--mask-from-output-threshold",
-        type=int,
-        help="Threshold for output-diff mask (0-255).",
-    )
-    parser.add_argument(
         "--model-mask-prompt",
         type=str,
         help="Override prompt for model-generated piping mask.",
@@ -313,19 +258,44 @@ def build_parser() -> argparse.ArgumentParser:
         help="Max output tokens for segmentation JSON responses.",
     )
     parser.add_argument(
+        "--post-mask-pass",
+        action="store_true",
+        help="Generate a binary piping mask from the edited output.",
+    )
+    parser.add_argument(
+        "--post-mask-prompt",
+        type=str,
+        help="Override prompt for post-edit mask generation.",
+    )
+    parser.add_argument(
+        "--post-mask-threshold",
+        type=int,
+        help="Threshold for binarizing post-edit masks (0-255).",
+    )
+    parser.add_argument(
+        "--post-mask-shift-y",
+        type=int,
+        help="Vertical pixel shift for post-edit mask (+down, -up).",
+    )
+    parser.add_argument(
+        "--post-mask-expand",
+        type=int,
+        help="Expand post-edit mask by N pixels (morphological dilation).",
+    )
+    parser.add_argument(
         "--mask-only",
         action="store_true",
         help="Generate mask only and skip edit/post processing.",
     )
     parser.add_argument(
-        "--cushion-mask-pass",
+        "--calibrate-mask",
         action="store_true",
-        help="Generate a cushion outline mask from the donor for the edit step.",
+        help="Create a red overlay from the most recent mask and save cal_mask.",
     )
     parser.add_argument(
-        "--no-cushion-mask-pass",
+        "--calibrate-mask-bbox",
         action="store_true",
-        help="Disable cushion outline mask pass even if enabled in env/config.",
+        help="Align the most recent mask to donor bbox before creating cal_mask.",
     )
     return parser
 
@@ -408,20 +378,6 @@ def main() -> None:
         config.temperature = args.temperature
     if args.mask_dir:
         config.masks_dir = args.mask_dir
-    if args.sam2_space:
-        config.sam2_space = args.sam2_space
-    if args.sam2_model:
-        config.sam2_model = args.sam2_model
-    if args.sam2_mask_threshold is not None:
-        config.sam2_mask_threshold = args.sam2_mask_threshold
-    if args.sam2_local_model:
-        config.sam2_local_model = args.sam2_local_model
-    if args.sam2_target:
-        config.sam2_target = args.sam2_target
-    if args.sam2_vertex_endpoint:
-        config.sam2_vertex_endpoint = args.sam2_vertex_endpoint
-    if args.sam2_vertex_location:
-        config.sam2_vertex_location = args.sam2_vertex_location
     if args.auto_aspect_ratio:
         config.auto_aspect_ratio = True
     if args.vertex_diagnose:
@@ -490,8 +446,6 @@ def main() -> None:
     fit_only = args.fit_only
     no_mask = args.no_mask or args.preserve_luminance or args.bare
     preserve_luminance = args.preserve_luminance and post_process
-    generate_mask = args.generate_mask and post_process
-    regenerate_mask = args.regenerate_mask and post_process
     vertex_bg_max_bytes = (
         args.vertex_bg_max_bytes
         if args.vertex_bg_max_bytes is not None
@@ -512,9 +466,6 @@ def main() -> None:
         else config.model_mask_threshold
     )
     segmentation_mask_pass = args.segmentation_mask_pass
-    cushion_mask_pass = args.cushion_mask_pass or config.cushion_mask_pass
-    if args.no_cushion_mask_pass:
-        cushion_mask_pass = False
     segmentation_mask_model = (
         args.segmentation_mask_model
         if args.segmentation_mask_model is not None
@@ -530,14 +481,31 @@ def main() -> None:
         if args.segmentation_max_output_tokens is not None
         else config.segmentation_max_output_tokens
     )
-    mask_only = args.mask_only
-    mask_from_output = args.mask_from_output
-    mask_from_output_threshold = (
-        args.mask_from_output_threshold
-        if args.mask_from_output_threshold is not None
-        else 10
+    post_mask_pass = args.post_mask_pass or config.post_mask_pass
+    post_mask_prompt = (
+        args.post_mask_prompt
+        if args.post_mask_prompt is not None
+        else config.post_mask_prompt
     )
-    # Allow model mask pass alongside mask-from-output so we can gate post masks.
+    post_mask_threshold = (
+        args.post_mask_threshold
+        if args.post_mask_threshold is not None
+        else config.post_mask_threshold
+    )
+    post_mask_shift_y = (
+        args.post_mask_shift_y
+        if args.post_mask_shift_y is not None
+        else config.post_mask_shift_y
+    )
+    post_mask_expand = (
+        args.post_mask_expand
+        if args.post_mask_expand is not None
+        else config.post_mask_expand
+    )
+    mask_only = args.mask_only
+    calibrate_mask = args.calibrate_mask or args.calibrate_mask_bbox
+    calibrate_mask_bbox = args.calibrate_mask_bbox
+    # Mask-from-output (diff mask) removed; model mask is required instead.
     run_pipeline(
         config,
         prompt_path=prompt_path,
@@ -578,19 +546,14 @@ def main() -> None:
         segmentation_mask_threshold=segmentation_mask_threshold,
         segmentation_response_mime_type=config.segmentation_response_mime_type,
         segmentation_max_output_tokens=segmentation_max_output_tokens,
-        mask_from_output=mask_from_output,
-        mask_from_output_threshold=mask_from_output_threshold,
-        generate_mask=generate_mask,
-        regenerate_mask=regenerate_mask,
-        sam2_model=args.sam2_model,
-        sam2_space=args.sam2_space,
-        sam2_mask_threshold=args.sam2_mask_threshold,
-        sam2_local_model=args.sam2_local_model,
-        sam2_target=args.sam2_target,
-        cushion_mask_pass=cushion_mask_pass,
-        sam2_vertex_endpoint=args.sam2_vertex_endpoint,
-        sam2_vertex_location=args.sam2_vertex_location,
+        post_mask_pass=post_mask_pass,
+        post_mask_prompt=post_mask_prompt,
+        post_mask_threshold=post_mask_threshold,
+        post_mask_shift_y=post_mask_shift_y,
+        post_mask_expand=post_mask_expand,
         mask_only=mask_only,
+        calibrate_mask=calibrate_mask,
+        calibrate_mask_bbox=calibrate_mask_bbox,
     )
 
 

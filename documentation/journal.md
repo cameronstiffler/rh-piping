@@ -469,3 +469,117 @@ YYYY-MM-DD
 - Enabled MODEL_MASK_PASS in .env to include cushion mask in the full workflow by default.
 - Stopped CLI from disabling model-mask pass when --mask-from-output is set so cushion masks can gate post composites.
 - Forced model mask generation to always use donor-sized masks so the cushion mask can reliably gate post diff compositing.
+
+---
+
+## 2026-02-01 (Sun)
+
+### Run notes: PID-7 R34 (final looked perfect)
+- Product: `Provence_Sofa112in_NaturalWeave_prod34270121_F_CC`
+- Donor (processed): `assets/processed/donor_image/Provence_Sofa112in_NaturalWeave_prod34270121_F_CC.png` (4096x1204, RGBA)
+- Prompt: `prompts/initial_prompt_PID-7.md`
+- Model: `gemini-3-pro-image-preview` via Vertex (model_tag `gemini849`)
+- Masking:
+  - Model mask pass enabled (MID-7 cushion-only binary mask from `prompts/mask_pass/mask_prompt_MID-7.md`).
+  - Segmentation mask pass **off**; cushion_mask_pass **off** (per `output/.../recent/run.json`).
+  - Mask submitted to edit step recorded in `output/.../recent/submitted/edit/edit_mask_PID-7_gemini849_20260201T211815Z_run0b8601a6_R34.png`.
+- References:
+  - Piping reference images available under `assets/original/piping_ref_highlighted/` (cyan outlines); pipeline uses them when present (capped by `PIPING_REF_MAX`).
+- Edit step artifacts:
+  - Donor submitted to edit: `output/.../recent/submitted/edit/edit_donor_PID-7_gemini849_20260201T211815Z_run0b8601a6_R34.png`.
+- Post-processing:
+  - Post enabled; output composited back onto donor using the model-generated cushion mask (mask used flag appears in filename as `_FM_`).
+  - Output written with donor alpha handling and config-driven Adobe RGB/DPI enforcement.
+- Output file: `output/Provence_Sofa112in_NaturalWeave_prod34270121_F_CC/ProvenceSo1bf4_PID-7_gemini849_FM_R34.png`.
+- Run metadata: `output/Provence_Sofa112in_NaturalWeave_prod34270121_F_CC/recent/run.json` (run_id `0b8601a6...`, run_stamp_utc `20260201T211815Z`).
+- Added optional post-edit piping mask pass to generate a binary mask from the edited output and save it under `recent/returned/mask/` (filename `piping_mask_...png`). Enable with `--post-mask-pass` or `POST_MASK_PASS=true`.
+
+---
+
+## 2026-02-01 (Sun)
+
+### Run notes: PID-7 R1 (cushion mask pass test)
+- Command: `python3 -m rh_piping --pid 7 --product "Provence_Sofa112in_NaturalWeave_prod34270121_F_CC" --results 1 --cushion-mask-pass`
+- Product: `Provence_Sofa112in_NaturalWeave_prod34270121_F_CC`
+- Donor (processed): `assets/processed/donor_image/Provence_Sofa112in_NaturalWeave_prod34270121_F_CC.png` (4096x1204, RGBA)
+- Mask: `assets/masks/Provence_Sofa112in_NaturalWeave_prod34270121_F_CC_cushion.png` (4096x1204)
+- Output: `output/Provence_Sofa112in_NaturalWeave_prod34270121_F_CC/ProvenceSo1bf4_PID-7_gemini849_FM_R1.png` (4096x1204)
+- Notes:
+  - Cushion mask pass disables model mask/segmentation/SAM2 mask paths.
+  - Mask coverage: ~6.03% of pixels.
+  - Mask pixels outside donor alpha: 0.00%.
+  - Mask bbox: (37, 57)–(3655, 1085); donor bbox: (28, 50)–(4068, 1179).
+  - Mask center delta vs donor alpha center: (-202px, -43.5px) ≈ (-4.93%, -3.61%).
+
+---
+
+## 2026-02-01 (Sun)
+
+### Run notes: PID-7 R2 (model mask pass, full result)
+- Command: `python3 -m rh_piping --pid 7 --product "Provence_Sofa112in_NaturalWeave_prod34270121_F_CC" --results 1 --model-mask-pass --no-cushion-mask-pass`
+- Product: `Provence_Sofa112in_NaturalWeave_prod34270121_F_CC`
+- Donor (processed): `assets/processed/donor_image/Provence_Sofa112in_NaturalWeave_prod34270121_F_CC.png` (4096x1204, RGBA)
+- Mask: `output/Provence_Sofa112in_NaturalWeave_prod34270121_F_CC/masks/ProvenceSo1bf4_PID-7_mask.png` (generated from 1904x560 model mask resized to 4096x1204)
+- Output: `output/Provence_Sofa112in_NaturalWeave_prod34270121_F_CC/ProvenceSo1bf4_PID-7_gemini849_FM_R2.png` (4096x1204)
+- Notes:
+  - Model mask pass retried twice; final mask was resized to donor size (ratio match).
+  - Model mask coverage reported: 0.5237.
+  - Post fit output to donor canvas (original 6336x2688).
+
+---
+
+## 2026-02-01 (Sun)
+
+### Run notes: PID-7 R3 (cushion+model combined, no shift)
+- Command: `python3 -m rh_piping --pid 7 --product "Provence_Sofa112in_NaturalWeave_prod34270121_F_CC" --results 1 --cushion-mask-pass --model-mask-pass`
+- Output: `output/Provence_Sofa112in_NaturalWeave_prod34270121_F_CC/ProvenceSo1bf4_PID-7_gemini849_FM_R3.png`
+- Notes:
+  - Combined post mask (model ∩ cushion) coverage: 0.0603.
+  - Post mask center delta vs donor: (-86.5px, -199px) ≈ (-2.11%, -16.53%).
+
+---
+
+## 2026-02-01 (Sun)
+
+### Run notes: PID-7 R4 (cushion+model combined, shift +199)
+- Command: `python3 -m rh_piping --pid 7 --product "Provence_Sofa112in_NaturalWeave_prod34270121_F_CC" --results 1 --cushion-mask-pass --model-mask-pass --post-mask-shift-y 199`
+- Output: `output/Provence_Sofa112in_NaturalWeave_prod34270121_F_CC/ProvenceSo1bf4_PID-7_gemini849_FM_R4.png`
+- Notes:
+  - Combined post mask (model ∩ cushion) shifted by +199px in Y.
+  - Post mask center delta vs donor: (-86.5px, 0px) ≈ (-2.11%, 0%).
+  - Calibration overlay: `output/Provence_Sofa112in_NaturalWeave_prod34270121_F_CC/recent/returned/post/cal_pipe_mask_PID-7_gemini849_20260202T053346Z_run70958bb4.png`.
+
+---
+
+## 2026-02-02 (Mon)
+
+### Summary
+- Removed SAM2 and cushion-mask feature usage; model mask is now the primary path.
+- Added/updated mask and image reference documentation.
+
+### What we did
+- Deleted cushion-mask CLI/config options and removed cushion-mask logic from the pipeline.
+- Removed SAM2 CLI/config options and generation paths.
+- Updated `.env.example` to remove SAM2/cushion settings.
+- Updated `documentation/masks_and_images.md` to reflect current mask/image types and note disabled features.
+
+---
+
+## 2026-02-02 (Mon)
+
+### Summary
+- Removed diff-mask feature; pipeline no longer builds or saves output-diff masks.
+- Removed SAM2 and cushion-mask support; runs now fail if requested.
+- Model mask is the primary mask path.
+
+---
+
+## 2026-02-02 (Mon)
+
+### Summary
+- Renamed the cushion-oriented model mask prompt and output naming.
+
+### What we did
+- Renamed `prompts/mask_pass/mask_prompt_MID-7.md` to `prompts/mask_pass/mask_prompt_MID-7_cushion.md`.
+- Updated model mask outputs to `model_cushion_mask_*.png`.
+- Renamed calibration overlays to `cal_mask_*.png`.

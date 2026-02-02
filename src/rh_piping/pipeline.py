@@ -819,7 +819,14 @@ def run_pipeline(
         existing_model_mask = model_mask_out if model_mask_out.exists() else None
         donor_bbox, _ = content_bbox_from_path(job.donor_processed)
         aspect_ratio = aspect_ratio_for_size(donor_meta.width, donor_meta.height)
-        api_aspect_ratio = aspect_ratio
+        api_aspect_ratio = None
+        if config.aspect_ratio:
+            api_aspect_ratio = config.aspect_ratio
+        elif config.auto_aspect_ratio:
+            api_aspect_ratio = _nearest_supported_aspect_ratio(
+                donor_meta.width,
+                donor_meta.height,
+            )
         recent_tag_base = _recent_tag(
             pid_label,
             model_tag_short,
@@ -872,6 +879,8 @@ def run_pipeline(
             print(f" api_aspect_ratio={api_aspect_ratio} (auto)")
         elif api_aspect_ratio:
             print(f" api_aspect_ratio={api_aspect_ratio}")
+        else:
+            print(" api_aspect_ratio=none (no padding)")
         print(f" results={results}")
         if mask_path and not no_mask:
             print(f" mask={mask_path}")
@@ -1493,6 +1502,7 @@ def run_pipeline(
                         _recent_filename("edit_mask", ".png", recent_tag_result),
                         mask_bytes,
                     )
+                edit_image_size = config.image_size if api_aspect_ratio else None
                 output_bytes = generate_piping_image(
                     client=client,
                     model_name=config.model,
@@ -1503,7 +1513,7 @@ def run_pipeline(
                     piping_ref_pngs=piping_ref_bytes,
                     mask_png=mask_bytes,
                     temperature=config.temperature,
-                    image_size=config.image_size,
+                    image_size=edit_image_size,
                     aspect_ratio=api_aspect_ratio,
                     response_mime_type=config.response_mime_type,
                     image_output_mime_type=config.image_output_mime_type,

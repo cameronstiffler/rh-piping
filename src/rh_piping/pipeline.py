@@ -1526,7 +1526,7 @@ def run_pipeline(
                         _recent_filename("edit_mask", ".png", recent_tag_result),
                         mask_bytes,
                     )
-                edit_image_size = config.image_size if api_aspect_ratio else None
+                edit_image_size = config.image_size
                 output_bytes = generate_piping_image(
                     client=client,
                     model_name=config.model,

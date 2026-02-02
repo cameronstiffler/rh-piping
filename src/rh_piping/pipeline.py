@@ -820,13 +820,18 @@ def run_pipeline(
         donor_bbox, _ = content_bbox_from_path(job.donor_processed)
         aspect_ratio = aspect_ratio_for_size(donor_meta.width, donor_meta.height)
         api_aspect_ratio = None
+        api_aspect_ratio_reason = None
         if config.aspect_ratio:
-            api_aspect_ratio = config.aspect_ratio
-        elif config.auto_aspect_ratio:
-            api_aspect_ratio = _nearest_supported_aspect_ratio(
-                donor_meta.width,
-                donor_meta.height,
-            )
+            if config.aspect_ratio == aspect_ratio:
+                api_aspect_ratio = config.aspect_ratio
+                api_aspect_ratio_reason = "config"
+            else:
+                api_aspect_ratio_reason = (
+                    f"ignored config {config.aspect_ratio} (donor {aspect_ratio})"
+                )
+        elif config.auto_aspect_ratio and aspect_ratio in SUPPORTED_ASPECT_RATIOS:
+            api_aspect_ratio = aspect_ratio
+            api_aspect_ratio_reason = "auto"
         recent_tag_base = _recent_tag(
             pid_label,
             model_tag_short,
@@ -875,12 +880,18 @@ def run_pipeline(
         print(f" prompt_id={prompt_id}")
         print(f" model={model_id}")
         print(f" aspect_ratio={aspect_ratio}")
-        if config.auto_aspect_ratio and not config.aspect_ratio and api_aspect_ratio:
-            print(f" api_aspect_ratio={api_aspect_ratio} (auto)")
-        elif api_aspect_ratio:
-            print(f" api_aspect_ratio={api_aspect_ratio}")
+        if api_aspect_ratio:
+            if api_aspect_ratio_reason == "auto":
+                print(f" api_aspect_ratio={api_aspect_ratio} (auto)")
+            else:
+                print(f" api_aspect_ratio={api_aspect_ratio}")
         else:
-            print(" api_aspect_ratio=none (no padding)")
+            note = (
+                f"{api_aspect_ratio_reason}; no padding"
+                if api_aspect_ratio_reason
+                else "no padding"
+            )
+            print(f" api_aspect_ratio=none ({note})")
         print(f" results={results}")
         if mask_path and not no_mask:
             print(f" mask={mask_path}")

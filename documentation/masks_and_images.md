@@ -16,9 +16,9 @@ Update this when any new mask or image artifact is added.
 - Color reference (processed)
   - Path: `assets/processed/color_reference/*.png`
 - Piping reference (original)
-  - Path: `assets/original/piping_ref_highlighted/*.png`
+  - Path: `assets/original/piping_ref_images/*.png`
 - Piping reference (processed)
-  - Path: `assets/processed/piping_ref_highlighted/*.png`
+  - Path: `assets/processed/piping_ref_images/*.png`
 
 ## Output Images
 

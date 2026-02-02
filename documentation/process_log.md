@@ -35,7 +35,7 @@ Append new runs at the bottom.
    - Edit mask (padded): `output/<product>/recent/submitted/edit/edit_mask_*.png` (derived from model cushion mask)
    - Donor submitted: `output/<product>/recent/submitted/edit/edit_donor_*.png`
    - Color ref (processed): `assets/processed/color_reference/<name>.png`
-   - Piping refs (processed): `assets/processed/piping_ref_highlighted/*.png`
+- Piping refs (processed): `assets/processed/piping_ref_images/*.png`
 
 6) **Model output (fit to donor proportions)**
    - `output/<product>/recent/returned/result/edit_raw_*.png`

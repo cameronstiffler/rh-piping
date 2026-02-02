@@ -59,11 +59,11 @@ from rh_piping.prompts import prompt_id_from_path
 ORIGINAL_ROOT = "original"
 DONOR_DIRNAME = "donor_image"
 COLOR_REF_DIRNAME = "color_reference"
-PIPING_REF_DIRNAME = "piping_ref_highlighted"
+PIPING_REF_DIRNAME = "piping_ref_images"
 
 PROCESSED_DONOR_DIRNAME = "donor_image"
 PROCESSED_COLOR_DIRNAME = "color_reference"
-PROCESSED_PIPING_REF_DIRNAME = "piping_ref_highlighted"
+PROCESSED_PIPING_REF_DIRNAME = "piping_ref_images"
 
 MAX_RESULTS = 100
 RAW_OUTPUT_MAX_ATTEMPTS = 3

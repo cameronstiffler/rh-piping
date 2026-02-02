@@ -314,7 +314,7 @@ This log captures notable work, decisions, and approach changes. Append new entr
 - Moved piping reference input folder to a dedicated highlighted‑image directory.
 
 ### What we did
-- Switched to `assets/original/piping_ref_highlighted/` (and matching processed folder) for piping refs.
+- Switched to `assets/original/piping_ref_images/` (and matching processed folder) for piping refs.
 
 ### Approaches and why we switched
 - You want refs that already have piping explicitly highlighted.
@@ -484,7 +484,7 @@ YYYY-MM-DD
   - Segmentation mask pass **off**; cushion_mask_pass **off** (per `output/.../recent/run.json`).
   - Mask submitted to edit step recorded in `output/.../recent/submitted/edit/edit_mask_PID-7_gemini849_20260201T211815Z_run0b8601a6_R34.png`.
 - References:
-  - Piping reference images available under `assets/original/piping_ref_highlighted/` (cyan outlines); pipeline uses them when present (capped by `PIPING_REF_MAX`).
+  - Piping reference images available under `assets/original/piping_ref_images/`; pipeline uses them when present (capped by `PIPING_REF_MAX`).
 - Edit step artifacts:
   - Donor submitted to edit: `output/.../recent/submitted/edit/edit_donor_PID-7_gemini849_20260201T211815Z_run0b8601a6_R34.png`.
 - Post-processing:

@@ -1683,3 +1683,26 @@ def composite_output_with_donor(
             "edge_guard_px": EDGE_GUARD_PX,
         }
         return buffer.getvalue(), stats
+
+
+def overlay_donor_with_mask(
+    output_bytes: bytes,
+    donor_path: Path,
+    mask_image: Image.Image,
+    invert: bool = False,
+) -> bytes:
+    with Image.open(io.BytesIO(output_bytes)) as out_img:
+        out_img = ImageOps.exif_transpose(out_img).convert("RGBA")
+    with Image.open(donor_path) as donor_img:
+        donor_img = ImageOps.exif_transpose(donor_img).convert("RGBA")
+    mask = mask_image.convert("L")
+    if mask.size != donor_img.size:
+        mask = ImageOps.fit(mask, donor_img.size, Image.NEAREST, centering=(0.5, 0.5))
+    if invert:
+        mask = ImageOps.invert(mask)
+    if out_img.size != donor_img.size:
+        out_img = ImageOps.fit(out_img, donor_img.size, Image.LANCZOS, centering=(0.5, 0.5))
+    merged = Image.composite(donor_img, out_img, mask)
+    buffer = io.BytesIO()
+    merged.save(buffer, format="PNG")
+    return buffer.getvalue()

@@ -1827,7 +1827,7 @@ def run_pipeline(
                     if model_cushion_mask_image is not None:
                         output_bytes = overlay_donor_with_mask(
                             output_bytes,
-                            composite_donor_path,
+                            job.donor_processed,
                             model_cushion_mask_image,
                             invert=True,
                         )
@@ -1983,7 +1983,7 @@ def run_pipeline(
                 if model_cushion_mask_image is not None:
                     output_bytes = overlay_donor_with_mask(
                         output_bytes,
-                        composite_donor_path,
+                        job.donor_processed,
                         model_cushion_mask_image,
                         invert=True,
                     )

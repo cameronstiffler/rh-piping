@@ -936,6 +936,8 @@ def run_pipeline(
         donor_piping_mask_bytes = None
         mask_api_bytes = None
         if mask_image is not None:
+            if config.mask_blur_radius > 0:
+                mask_image = mask_image.filter(ImageFilter.GaussianBlur(radius=config.mask_blur_radius))
             mask_bytes = build_square_mask_input(
                 mask_image,
                 (donor_meta.width, donor_meta.height),

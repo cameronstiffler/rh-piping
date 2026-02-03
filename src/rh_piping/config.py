@@ -69,6 +69,7 @@ class AppConfig:
     prompts_dir: Path = PROMPTS_DIR
     processed_dir: Path = PROCESSED_DIR
     masks_dir: Path = MASKS_DIR
+    mask_blur_radius: int = 0
     final_saturation: float = 1.0
     final_hue_shift: float = 0.0
 
@@ -170,6 +171,9 @@ def load_config() -> AppConfig:
     donor_piping_mask_threshold = _env_int("DONOR_PIPING_MASK_THRESHOLD")
     if donor_piping_mask_threshold is None:
         donor_piping_mask_threshold = model_mask_threshold
+    mask_blur_radius = _env_int("MASK_BLUR_RADIUS")
+    if mask_blur_radius is None:
+        mask_blur_radius = 0
 
     return AppConfig(
         model=model,
@@ -215,10 +219,11 @@ def load_config() -> AppConfig:
         post_mask_pass=post_mask_pass,
         post_mask_prompt=post_mask_prompt,
         post_mask_threshold=post_mask_threshold,
-        post_mask_shift_y=post_mask_shift_y,
-        post_mask_expand=post_mask_expand,
-        donor_piping_mask_prompt=donor_piping_mask_prompt,
-        donor_piping_mask_threshold=donor_piping_mask_threshold,
+       post_mask_shift_y=post_mask_shift_y,
+       post_mask_expand=post_mask_expand,
+       donor_piping_mask_prompt=donor_piping_mask_prompt,
+       donor_piping_mask_threshold=donor_piping_mask_threshold,
+        mask_blur_radius=mask_blur_radius,
         final_saturation=_env_float("FINAL_SATURATION", 1.0),
         final_hue_shift=_env_float("FINAL_HUE_SHIFT", 0.0),
     )

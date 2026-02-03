@@ -1832,6 +1832,16 @@ def run_pipeline(
                         "Post-processing requires a mask to preserve donor geometry. "
                         "Disable --no-mask or use --no-post/--bare for raw output."
                     )
+                # Prefer donor piping mask for composite; intersect with cushion mask if both exist.
+                if donor_piping_mask_image is not None:
+                    if mask_image is not None:
+                        mask_image = _intersect_mask_images(
+                            donor_piping_mask_image,
+                            mask_image,
+                            (donor_meta.width, donor_meta.height),
+                        )
+                    else:
+                        mask_image = donor_piping_mask_image
                 if mask_image is None:
                     raise RuntimeError(
                         "Post-processing requires a mask image to composite pipes onto the donor. "

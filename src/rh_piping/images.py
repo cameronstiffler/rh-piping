@@ -347,10 +347,14 @@ def composite_over_background(
 ) -> bytes:
     with Image.open(io.BytesIO(output_bytes)) as out_img:
         out_img = ImageOps.exif_transpose(out_img).convert("RGBA")
+        icc_profile = out_img.info.get("icc_profile")
         bg = Image.new("RGB", out_img.size, background_color)
         bg.paste(out_img, mask=out_img.getchannel("A"))
         buffer = io.BytesIO()
-        bg.save(buffer, format="PNG")
+        save_kwargs = {}
+        if icc_profile:
+            save_kwargs["icc_profile"] = icc_profile
+        bg.save(buffer, format="PNG", **save_kwargs)
         return buffer.getvalue()
 
 
@@ -518,6 +522,27 @@ def align_mask_bytes(
         mask_rgb.paste(white, mask=mask_img)
         buffer = io.BytesIO()
         mask_rgb.save(buffer, format="PNG")
+        return buffer.getvalue()
+
+
+def align_mask_bytes_soft(
+    mask_bytes: bytes,
+    target_size: tuple[int, int],
+) -> bytes:
+    with Image.open(io.BytesIO(mask_bytes)) as mask_img:
+        mask_img = ImageOps.exif_transpose(mask_img).convert("L")
+        src_w, src_h = mask_img.size
+        tgt_w, tgt_h = target_size
+        if (src_w, src_h) != (tgt_w, tgt_h):
+            if src_w == tgt_w and src_h >= tgt_h:
+                top = max(0, (src_h - tgt_h) // 2)
+                mask_img = mask_img.crop((0, top, tgt_w, top + tgt_h))
+            else:
+                mask_img = ImageOps.fit(
+                    mask_img, target_size, Image.LANCZOS, centering=(0.5, 0.5)
+                )
+        buffer = io.BytesIO()
+        mask_img.save(buffer, format="PNG")
         return buffer.getvalue()
 
 
@@ -1148,6 +1173,7 @@ def composite_with_mask(
         donor_img = ImageOps.exif_transpose(donor_img).convert("RGBA")
         donor_rgb = donor_img.convert("RGB")
         donor_alpha = donor_img.getchannel("A")
+        donor_icc = donor_img.info.get("icc_profile")
     with Image.open(io.BytesIO(mask_bytes)) as mask_img:
         mask_img = ImageOps.exif_transpose(mask_img).convert("L")
     if mask_img.size != donor_rgb.size:
@@ -1158,7 +1184,10 @@ def composite_with_mask(
     merged = merged.convert("RGBA")
     merged.putalpha(donor_alpha)
     buffer = io.BytesIO()
-    merged.save(buffer, format="PNG")
+    save_kwargs = {}
+    if donor_icc:
+        save_kwargs["icc_profile"] = donor_icc
+    merged.save(buffer, format="PNG", **save_kwargs)
     return buffer.getvalue()
 def build_square_mask_input(
     mask_image: Image.Image,
@@ -1606,6 +1635,7 @@ def composite_output_with_donor(
         source_img = ImageOps.exif_transpose(source_img)
         if source_img.mode != "RGBA":
             source_img = source_img.convert("RGBA")
+        donor_icc = source_img.info.get("icc_profile")
         alpha_channel = source_img.getchannel("A")
         target_size = source_img.size
         has_alpha = alpha_channel.getextrema() != (255, 255)
@@ -1630,7 +1660,10 @@ def composite_output_with_donor(
             composited = output_img.convert("RGBA")
             composited.putalpha(alpha_channel)
             buffer = io.BytesIO()
-            composited.save(buffer, format="PNG", icc_profile=output_img.info.get("icc_profile"))
+            save_kwargs = {}
+            if donor_icc:
+                save_kwargs["icc_profile"] = donor_icc
+            composited.save(buffer, format="PNG", **save_kwargs)
             stats = {
                 "has_alpha": has_alpha,
                 "resized": resized,
@@ -1667,7 +1700,10 @@ def composite_output_with_donor(
         composited = composited.convert("RGBA")
         composited.putalpha(alpha_channel)
         buffer = io.BytesIO()
-        composited.save(buffer, format="PNG", icc_profile=output_img.info.get("icc_profile"))
+        save_kwargs = {}
+        if donor_icc:
+            save_kwargs["icc_profile"] = donor_icc
+        composited.save(buffer, format="PNG", **save_kwargs)
         stats = {
             "has_alpha": has_alpha,
             "resized": resized,
@@ -1695,6 +1731,7 @@ def overlay_donor_with_mask(
         out_img = ImageOps.exif_transpose(out_img).convert("RGBA")
     with Image.open(donor_path) as donor_img:
         donor_img = ImageOps.exif_transpose(donor_img).convert("RGBA")
+        donor_icc = donor_img.info.get("icc_profile")
     mask = mask_image.convert("L")
     if mask.size != donor_img.size:
         mask = ImageOps.fit(mask, donor_img.size, Image.NEAREST, centering=(0.5, 0.5))
@@ -1704,5 +1741,8 @@ def overlay_donor_with_mask(
         out_img = ImageOps.fit(out_img, donor_img.size, Image.LANCZOS, centering=(0.5, 0.5))
     merged = Image.composite(donor_img, out_img, mask)
     buffer = io.BytesIO()
-    merged.save(buffer, format="PNG")
+    save_kwargs = {}
+    if donor_icc:
+        save_kwargs["icc_profile"] = donor_icc
+    merged.save(buffer, format="PNG", **save_kwargs)
     return buffer.getvalue()

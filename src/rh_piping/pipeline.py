@@ -35,7 +35,6 @@ from rh_piping.images import (
     fit_output_to_donor,
     ensure_adobe_rgb,
     ensure_dpi,
-    align_mask_bytes,
     clip_mask_bytes_to_alpha,
     composite_with_mask,
     crop_padding_from_bytes,
@@ -47,10 +46,10 @@ from rh_piping.images import (
     normalize_mask_bytes,
     normalize_mask_bytes_exact,
     adjust_image_color,
-    overlay_donor_with_mask,
     parse_hex_color,
     apply_donor_alpha,
     restore_rgb_under_alpha,
+    align_mask_bytes_soft,
 )
 from rh_piping.io import ensure_dir, list_images
 from rh_piping.masks import (
@@ -75,7 +74,7 @@ RAW_SCALE_TOLERANCE = 0.03
 MODEL_MASK_MAX_ATTEMPTS = 3
 POST_MASK_MAX_ATTEMPTS = 3
 MAX_FAILURES = 5
-DONOR_PIPING_MASK_EXPAND = 8
+DONOR_PIPING_MASK_EXPAND = 4
 PROMPT_PID_VALUE = re.compile(r"PID(?P<value>-?\d+)")
 RECENT_DIRNAME = "recent"
 RECENT_SUBMITTED_EDIT_DIR = "submitted/edit"
@@ -152,19 +151,6 @@ def _prepare_composite_donor(
         save_kwargs["icc_profile"] = icc_profile
     donor_img.save(composite_path, format="PNG", **save_kwargs)
     return composite_path
-
-
-def _save_current_donor_snapshot(
-    current_donor_dir: Path,
-    donor_path: Path,
-    short_tag: str,
-    label: str,
-    recent_tag: str,
-) -> None:
-    safe_label = re.sub(r"[^A-Za-z0-9._-]+", "-", label.strip()) or "step"
-    snapshot_name = f"{short_tag}_donor_{safe_label}_{recent_tag}.png"
-    snapshot_path = current_donor_dir / snapshot_name
-    snapshot_path.write_bytes(Path(donor_path).read_bytes())
 
 
 def _format_mask_prompt(
@@ -889,15 +875,6 @@ def run_pipeline(
                 out_dir,
                 recent_tag_base,
             )
-        current_donor_dir = out_dir / "current_donor"
-        ensure_dir(current_donor_dir)
-        _save_current_donor_snapshot(
-            current_donor_dir,
-            composite_donor_path,
-            mask_short_tag,
-            "start",
-            recent_tag_base,
-        )
         _write_recent_json(
             out_dir,
             "run.json",
@@ -1287,15 +1264,6 @@ def run_pipeline(
                 else:
                     model_mask_bytes = mask_bytes_donor
                     mask_bytes = mask_bytes_donor
-            if model_mask_bytes is not None:
-                _save_current_donor_snapshot(
-                    current_donor_dir,
-                    composite_donor_path,
-                    mask_short_tag,
-                    "after_model_mask",
-                    recent_tag_base,
-                )
-
         base_prompt = donor_piping_mask_prompt
         if base_prompt is None:
             base_prompt = _load_donor_piping_mask_prompt(config.prompts_dir, prompt_id)
@@ -1385,25 +1353,10 @@ def run_pipeline(
         print(f" [donor-piping-mask] saved -> {donor_piping_mask_out}")
         donor_piping_mask_image = mask_img
         donor_piping_mask_bytes = donor_mask_png
-        _save_current_donor_snapshot(
-            current_donor_dir,
-            composite_donor_path,
-            mask_short_tag,
-            "after_donor_piping_mask",
-            recent_tag_base,
-        )
 
         if mask_only:
             print("[mask-only] mask generated; skipping edit/post generation.")
             continue
-
-        _save_current_donor_snapshot(
-            current_donor_dir,
-            composite_donor_path,
-            mask_short_tag,
-            "pre_edit",
-            recent_tag_base,
-        )
 
         print("[submission]")
         print(
@@ -1442,8 +1395,6 @@ def run_pipeline(
         print("[/submission]")
 
         ensure_dir(out_dir)
-        current_donor_path = current_donor_dir / f"{mask_short_tag}_donor.png"
-        current_donor_path.write_bytes(Path(composite_donor_path).read_bytes())
 
         mask_used = mask_image is not None
         flag_tag = _format_flag_tag_short(
@@ -1796,42 +1747,19 @@ def run_pipeline(
                         )
                 composite_mask_bytes = donor_piping_mask_bytes or model_mask_bytes
                 if composite_mask_bytes is not None:
-                    _save_current_donor_snapshot(
-                        current_donor_dir,
-                        composite_donor_path,
-                        mask_short_tag,
-                        "pre_composite",
-                        recent_tag_result,
-                    )
                     aligned_bytes, _ = fit_output_to_donor(
                         output_bytes, composite_donor_path
                     )
-                    donor_mask_bytes = align_mask_bytes(
+                    donor_mask_bytes = align_mask_bytes_soft(
                         composite_mask_bytes,
                         (donor_meta.width, donor_meta.height),
-                        threshold=model_mask_threshold,
                     )
                     output_bytes = composite_with_mask(
                         aligned_bytes,
                         composite_donor_path,
                         donor_mask_bytes,
                     )
-                    _save_current_donor_snapshot(
-                        current_donor_dir,
-                        composite_donor_path,
-                        mask_short_tag,
-                        "post_composite",
-                        recent_tag_result,
-                    )
                     print(" [post] composited piping onto donor via cushion mask")
-                    if model_cushion_mask_image is not None:
-                        output_bytes = overlay_donor_with_mask(
-                            output_bytes,
-                            job.donor_processed,
-                            model_cushion_mask_image,
-                            invert=True,
-                        )
-                        print(" [post] overlaid donor outside cushions on composite")
                 raw_attempts = 0
                 preview_bytes = None
                 if preview_bg_color:
@@ -1851,13 +1779,6 @@ def run_pipeline(
                             saturation_scale=config.final_saturation,
                             hue_shift=config.final_hue_shift,
                         )
-                    _save_current_donor_snapshot(
-                        current_donor_dir,
-                        composite_donor_path,
-                        mask_short_tag,
-                        "post_color_adjust",
-                        recent_tag_result,
-                    )
                 ext = _sniff_image_extension(output_bytes)
                 if ext != ".png":
                     out_path = out_dir / f"{out_stem}{ext}"
@@ -1959,13 +1880,6 @@ def run_pipeline(
                         "Post-processing requires a mask image to composite pipes onto the donor. "
                         "Provide a mask file or enable mask generation."
                     )
-                _save_current_donor_snapshot(
-                    current_donor_dir,
-                    composite_donor_path,
-                    mask_short_tag,
-                    "pre_composite",
-                    recent_tag_result,
-                )
                 output_bytes, stats = composite_output_with_donor(
                     output_bytes,
                     composite_donor_path,
@@ -1973,21 +1887,6 @@ def run_pipeline(
                     preserve_luminance=preserve_luminance,
                     mask_image=mask_image,
                 )
-                _save_current_donor_snapshot(
-                    current_donor_dir,
-                    composite_donor_path,
-                    mask_short_tag,
-                    "post_composite",
-                    recent_tag_result,
-                )
-                if model_cushion_mask_image is not None:
-                    output_bytes = overlay_donor_with_mask(
-                        output_bytes,
-                        job.donor_processed,
-                        model_cushion_mask_image,
-                        invert=True,
-                    )
-                    print(" [post] overlaid donor outside cushions on composite")
                 if stats["resized"]:
                     target_w, target_h = stats["target_size"]
                     orig_w, orig_h = stats["original_size"]
@@ -2023,25 +1922,18 @@ def run_pipeline(
                     output_bytes,
                     preview_bg_color,
                 )
-            if config.final_saturation != 1.0 or config.final_hue_shift != 0.0:
-                output_bytes = adjust_image_color(
-                    output_bytes,
-                    saturation_scale=config.final_saturation,
-                    hue_shift=config.final_hue_shift,
-                )
-                if preview_bytes is not None:
-                    preview_bytes = adjust_image_color(
-                        preview_bytes,
+                if config.final_saturation != 1.0 or config.final_hue_shift != 0.0:
+                    output_bytes = adjust_image_color(
+                        output_bytes,
                         saturation_scale=config.final_saturation,
                         hue_shift=config.final_hue_shift,
                     )
-                _save_current_donor_snapshot(
-                    current_donor_dir,
-                    composite_donor_path,
-                    mask_short_tag,
-                    "post_color_adjust",
-                    recent_tag_result,
-                )
+                    if preview_bytes is not None:
+                        preview_bytes = adjust_image_color(
+                            preview_bytes,
+                            saturation_scale=config.final_saturation,
+                            hue_shift=config.final_hue_shift,
+                        )
             out_path.write_bytes(output_bytes)
             print(f" ✔ Saved -> {out_path}")
             if config.enforce_adobe_rgb:

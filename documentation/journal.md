@@ -733,3 +733,21 @@ YYYY-MM-DD
 - What we did:
   - Introduced `MASK_BLUR_RADIUS` (default 0) so the mask keeps #000/#FFF cores but gains a thin gray feather along the edges.
   - This softer boundary keeps the final composite aligned with the donor piping mask while making the transition between pipes and cushions more subtle.
+
+## 2026-02-03 (Tue) — Preserve donor ICC profile in composites
+- Summary: Keep the donor color profile through composite steps to prevent global washout.
+- What we did:
+  - Composite outputs now save with the donor image ICC profile (when present).
+  - This applies to `composite_output_with_donor`, `composite_with_mask`, `overlay_donor_with_mask`, and preview background compositing.
+
+## 2026-02-03 (Tue) — Donor piping mask expansion + composite cleanup
+- Summary: Reduced donor piping mask expansion and removed donor-outside overlay.
+- What we did:
+  - Donor piping mask expansion reduced from 8px to 4px.
+  - Removed the “overlay donor outside cushions” composite step (no longer needed for color recovery).
+  - Composite now keeps soft mask grays instead of hard-thresholding during the piping composite.
+
+## 2026-02-03 (Tue) — Remove donor snapshot captures
+- Summary: Removed the `current_donor/` snapshot captures from the pipeline.
+- What we did:
+  - Deleted the snapshot writes taken before/after mask and composite steps.

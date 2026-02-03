@@ -751,3 +751,8 @@ YYYY-MM-DD
 - Summary: Removed the `current_donor/` snapshot captures from the pipeline.
 - What we did:
   - Deleted the snapshot writes taken before/after mask and composite steps.
+
+## 2026-02-03 (Tue) — Donor piping mask feathering
+- Summary: Added a light blur option for the donor piping mask to smooth jagged pipe edges.
+- What we did:
+  - Added `DONOR_PIPING_MASK_BLUR` (default 0.0). When >0, we apply a small Gaussian blur after expansion.

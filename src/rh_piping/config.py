@@ -64,6 +64,7 @@ class AppConfig:
     post_mask_expand: int
     donor_piping_mask_prompt: str | None
     donor_piping_mask_threshold: int
+    donor_piping_mask_blur: float
     assets_dir: Path = ASSETS_DIR
     output_dir: Path = OUTPUT_DIR
     prompts_dir: Path = PROMPTS_DIR
@@ -172,6 +173,7 @@ def load_config() -> AppConfig:
     donor_piping_mask_threshold = _env_int("DONOR_PIPING_MASK_THRESHOLD")
     if donor_piping_mask_threshold is None:
         donor_piping_mask_threshold = model_mask_threshold
+    donor_piping_mask_blur = _env_float("DONOR_PIPING_MASK_BLUR", 0.0)
     mask_blur_radius = _env_int("MASK_BLUR_RADIUS")
     if mask_blur_radius is None:
         mask_blur_radius = 0
@@ -225,6 +227,7 @@ def load_config() -> AppConfig:
         post_mask_expand=post_mask_expand,
         donor_piping_mask_prompt=donor_piping_mask_prompt,
         donor_piping_mask_threshold=donor_piping_mask_threshold,
+        donor_piping_mask_blur=donor_piping_mask_blur,
         mask_blur_radius=mask_blur_radius,
         composite_original_donor=composite_original_donor,
         final_saturation=_env_float("FINAL_SATURATION", 1.0),

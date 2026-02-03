@@ -1335,6 +1335,11 @@ def run_pipeline(
             mask_img = mask_img.filter(ImageFilter.MaxFilter(kernel))
             mask_img = mask_img.point(lambda p: 255 if p > 0 else 0)
             print(f" [donor-piping-mask] expanded by {DONOR_PIPING_MASK_EXPAND}px")
+        if config.donor_piping_mask_blur > 0:
+            mask_img = mask_img.filter(
+                ImageFilter.GaussianBlur(config.donor_piping_mask_blur)
+            )
+            print(f" [donor-piping-mask] blurred by {config.donor_piping_mask_blur}px")
         buffer = io.BytesIO()
         mask_img.save(buffer, format="PNG")
         donor_mask_png = buffer.getvalue()

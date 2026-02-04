@@ -1,20 +1,19 @@
 Task: High-fidelity image manipulation of the sofa in Donor Image. Change appearance of stitch seam piping material on sofa upholstery to match swatch in Color Reference Image. Only the color of the seam piping material is changed and the rest of the Result Image remains identical to the original Donor Image.
 
-Core Subject: The pipes on the sofa upholstery from the Donor Image need to be found and surgically recolored so they match the swatch in Color Reference Image. Do NOT add new piping, do NOT create a second line, and do NOT shift the pipe position. Recolor in-place only.
+Core Subject: The pipes on the sofa upholstery from the Donor Image need to be found and recolored so they match the swatch in Color Reference Image. Recolor in-place only.
 
 Pipe Style Reference Example: Use the unmarked example at `assets/original/piping_ref_images/Antibes_AluminumDiningSideChair_White_prod39010446_E25624663178_TQ_CC.png` (this is the first file in that folder). 
 
 Critical realism constraints (must follow):
-- Do NOT draw, trace, outline, or “ink” any seams. No thick dark lines. No edge-stroking.
-- Do NOT widen the piping, sharpen it into a graphic line, or change its geometry. Keep the original piping width/shape exactly.
-- Only recolor the existing piping pixels in-place (preserve stitch texture, highlights, shadows, and fabric grain). If a pixel is not clearly part of existing piping in the donor, leave it unchanged.
+- If entire width of pipe is not visible, assume it is the average pipe width.
+- Only recolor the existing piping pixels in-place.
 - The goal is a subtle, photoreal material recolor of the existing cord/stitching—not a new line.
 - Match the donor’s existing piping lightness pattern: keep the same highlight/shadow gradients and contrast as the donor. Only shift the piping hue/chroma toward the swatch; do not darken it into a uniform stroke.
 - Preserve the donor piping luminance exactly (same brightness per pixel); only change hue/chroma toward the swatch.
 
 Lighting and Atmosphere: There is no need to recalculate lighting. We only want the piping to appearance to match the color of the swatch. Outside of the pipes, the rest of the Result Image must remain the same as the original Donor Image. The sofa lighting and shadows must remain identical to the Donor Image. The background must be a solid, flat white (#FFFFFF), fully opaque — no gradients, textures, or transparency. Keep the exact donor contact shadow under the sofa; mimic its shape, position, and softness.
 
-Strict Requirements: Everything about the sofa and background remains exactly like the Donor Image. Only the piping on the sofa upholstery may be changed. Only modify pixels where the cushion mask overlaps with the Donor Image sofa pipes; do not change anything outside the mask and do not infer seams beyond the piping. The donor piping mask is applied during the final composite so donor cushions stay untouched, and the model cushion mask remains active while generating the edit. There must be exactly one pipe line per seam: no doubles, no offsets, no ghost lines.
+Strict Requirements: Everything about the sofa and background remains exactly like the Donor Image. Only the piping on the sofa upholstery may be changed. Only modify pixels where the cushion mask overlaps with the Donor Image sofa pipes; do not change anything outside the mask and do not infer seams beyond the piping. The donor piping mask is applied during the final composite so donor cushions stay untouched, and the model cushion mask remains active while generating the edit. There must be exactly one pipe line per seam.
 Quality Requirements: Do not add smudges, stains, blotches, or halos on the cushions. Preserve the donor fabric texture and keep edges clean and realistic.
 Framing Requirement: Entire sofa fully visible in frame; no part of the sofa is cropped or cut off.
 Scale Requirement: Sofa scale matches the Sofa in the Donor Image exactly; the sofa’s pixel width and height match the sofa in the Donor Image.
@@ -25,3 +24,8 @@ Techinical Requirements:
 Color Space: Use Adobe RGB (1998).
 Resolution: 300 DPI.
 Image Dimensions: Overall output image may be taller than the Donor Image while preserving the sofa’s original pixel size.
+
+Negative Prompt: 
+- Do NOT add new piping, do NOT create a second line, and do NOT shift the pipe position.
+- Do NOT draw, trace, outline, or “ink” any seams. No thick dark lines. No edge-stroking.
+- Do NOT widen the piping, sharpen it into a graphic line, or change its geometry. Keep the original piping width/shape exactly.

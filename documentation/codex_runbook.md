@@ -36,7 +36,7 @@ Produce **photorealistic** furniture edits where **only the seam piping material
 
 There is a *QA-only* reference path image:
 
-- `assets/processed/donor_pipe_location/donor_pipe_path.png`
+- `assets/processed/QA_pass/donor_pipe_path.png`
 
 Use it only to judge whether the edited piping “flows” along the expected path. It must **never** be required in production because real subjects differ.
 

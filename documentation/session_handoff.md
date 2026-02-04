@@ -45,7 +45,7 @@ These are the knobs used during recent iterations:
 - `COMPOSITE_MASK_FEATHER`: 0.4–0.6
 
 ## QA references (QA-only)
-- Pipe-path overlay: `assets/processed/donor_pipe_location/donor_pipe_path.png`
+- Pipe-path overlay: `assets/processed/QA_pass/donor_pipe_path.png`
 - QA outputs: `output/<product>/recent/returned/post/*pipe_path_score*.json`
 
 ## Resume checklist

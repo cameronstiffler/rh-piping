@@ -1,0 +1,23 @@
+Hi Cameron,
+
+ 
+
+I don’t think we are there yet but getting close. Sorry, you are going to hate me. Are you able to view side-by-side at 200% with calibrated monitors?
+
+done---The wicker color is better but still slightly off, a little brightness boost might fix it or a little less red. If we are masking out the wicker portion, I would expect to be completely unchanged by any generative source. Is that consistent with your understanding?
+There are still some hard transitions with the masking I mentioned before. Needs some more mask feathering
+done--The cushion texture was better in a previous version and there is now a warm color cast to them that needs adjusting
+There is a bad overlay on the left side where the back cushion meets the wicker arm
+doneThe cushions definitely lack sharpness. If we can mask the cushions out so they are unchanged like the wicker except along the edges, that would be great
+At the center, you can see the piping was drawn on to the left cushion, but its original piping is still visible right next the new piping
+There is a bad overlay on the right side where the seat cushion meets the wicker arm
+We lose some of the piping on the top right side of rightmost back cushion
+ 
+
+I’m not familiar with AI techniques and haven’t looked at the prompts. Gotta ask, is the process you’re using going to be repeatable with other couches that have a different shape and material? Something we will not need to manually tweak for each product line?
+
+ 
+
+ 
+
+Karl

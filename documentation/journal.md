@@ -42,9 +42,11 @@ This log captures notable work, decisions, and approach changes. Append new entr
 
 ### Summary
 - Added a session handoff snapshot so new sessions can resume without re-briefing.
+ - Added a QA process doc for post-render checks.
 
 ### What we did
 - Recorded canonical workflow, current PID/product, best recent outputs, and tuning knobs in `documentation/session_handoff.md`.
+ - Documented post-render QA steps in `documentation/qa_process.md`.
 
 ---
 

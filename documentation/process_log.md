@@ -51,6 +51,7 @@ Append new runs at the bottom.
    - Optional QA-only pipe-path scoring artifacts:
      - `output/<product>/recent/returned/post/*pipe_path_score*.json`
      - `output/<product>/recent/returned/post/*cal_mask_pipe_path*.png`
+   - QA reference path image: `assets/processed/QA_pass/donor_pipe_path.png`
 
 ## Run Log (Append Below)
 

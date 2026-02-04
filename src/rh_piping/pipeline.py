@@ -338,6 +338,11 @@ def _first_free_index(indices: set[int]) -> int:
     return candidate
 
 
+def _select_latest_result(out_dir: Path, stem_prefix: str) -> Path | None:
+    candidates = sorted(out_dir.glob(f"{stem_prefix}*.png"))
+    return candidates[-1] if candidates else None
+
+
 def _output_size_from_bytes(output_bytes: bytes) -> tuple[int, int]:
     with Image.open(io.BytesIO(output_bytes)) as out_img:
         out_img = ImageOps.exif_transpose(out_img)
@@ -1587,36 +1592,45 @@ def run_pipeline(
             print(
                 f" → Request {generated + 1}/{results} for {job.product_name} (R-{result_index})"
             )
+            skip_edit = False
+            if config.skip_api_calls:
+                latest = _select_latest_result(out_dir, stem_prefix)
+                if latest is None:
+                    raise RuntimeError("SKIP_API_CALLS set but no prior result exists.")
+                output_bytes = latest.read_bytes()
+                skip_edit = True
+                print(f" ↷ Using cached result: {latest.name}")
             try:
-                _write_recent_file(
-                    out_dir,
-                    RECENT_SUBMITTED_EDIT_DIR,
-                    _recent_filename("edit_donor", ".png", recent_tag_result),
-                    donor_model_bytes,
-                )
-                if mask_bytes is not None:
+                if not skip_edit:
                     _write_recent_file(
                         out_dir,
                         RECENT_SUBMITTED_EDIT_DIR,
-                        _recent_filename("edit_mask", ".png", recent_tag_result),
-                        mask_bytes,
+                        _recent_filename("edit_donor", ".png", recent_tag_result),
+                        donor_model_bytes,
                     )
-                edit_image_size = config.image_size
-                output_bytes = generate_piping_image(
-                    client=client,
-                    model_name=config.model,
-                    use_vertex=config.use_vertex,
-                    prompt=prompt_text,
-                    donor_png=donor_api_bytes,
-                    color_ref_png=color_bytes,
-                    piping_ref_pngs=piping_ref_bytes,
-                    mask_png=mask_api_bytes,
-                    temperature=config.temperature,
-                    image_size=edit_image_size,
-                    aspect_ratio=api_aspect_ratio,
-                    response_mime_type=config.response_mime_type,
-                    image_output_mime_type=config.image_output_mime_type,
-                )
+                    if mask_bytes is not None:
+                        _write_recent_file(
+                            out_dir,
+                            RECENT_SUBMITTED_EDIT_DIR,
+                            _recent_filename("edit_mask", ".png", recent_tag_result),
+                            mask_bytes,
+                        )
+                    edit_image_size = config.image_size
+                    output_bytes = generate_piping_image(
+                        client=client,
+                        model_name=config.model,
+                        use_vertex=config.use_vertex,
+                        prompt=prompt_text,
+                        donor_png=donor_api_bytes,
+                        color_ref_png=color_bytes,
+                        piping_ref_pngs=piping_ref_bytes,
+                        mask_png=mask_api_bytes,
+                        temperature=config.temperature,
+                        image_size=edit_image_size,
+                        aspect_ratio=api_aspect_ratio,
+                        response_mime_type=config.response_mime_type,
+                        image_output_mime_type=config.image_output_mime_type,
+                    )
                 output_bytes = crop_padding_from_bytes(output_bytes, donor_padding)
                 out_w, out_h = _output_size_from_bytes(output_bytes)
                 if (out_w, out_h) != (donor_meta.width, donor_meta.height):

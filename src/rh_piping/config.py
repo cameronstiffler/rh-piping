@@ -76,6 +76,7 @@ class AppConfig:
     final_saturation: float = 1.0
     final_hue_shift: float = 0.0
     latest_result_dir: str | None = None
+    skip_api_calls: bool = False
 
 
 def _env_flag(name: str, default: bool = False) -> bool:
@@ -239,4 +240,5 @@ def load_config() -> AppConfig:
         final_saturation=_env_float("FINAL_SATURATION", 1.0),
         final_hue_shift=_env_float("FINAL_HUE_SHIFT", 0.0),
         latest_result_dir=_env_str("LATEST_RESULT_DIR"),
+        skip_api_calls=_env_flag("SKIP_API_CALLS", default=False),
     )

@@ -756,3 +756,18 @@ YYYY-MM-DD
 - Summary: Added a light blur option for the donor piping mask to smooth jagged pipe edges.
 - What we did:
   - Added `DONOR_PIPING_MASK_BLUR` (default 0.0). When >0, we apply a small Gaussian blur after expansion.
+
+## 2026-02-03 (Tue) — Donor piping mask expansion control
+- Summary: Made donor piping mask expansion configurable for iteration.
+- What we did:
+  - Added `DONOR_PIPING_MASK_EXPAND` (default 2). Increase to thicken pipes; reduce for tighter edges.
+
+## 2026-02-03 (Tue) — Post-mask pass default
+- Summary: Post-mask pass now defaults off to avoid unexpected output masks.
+- What we did:
+  - `POST_MASK_PASS` defaults to false; enable explicitly per run when you want a mask derived from the edit output.
+
+## 2026-02-03 (Tue) — Latest result copy
+- Summary: Auto-copy the final output image to a shared folder after each run.
+- What we did:
+  - Added `LATEST_RESULT_DIR` (optional). When set, the pipeline copies the final PNG to `latest.png` in that folder, overwriting any existing file.

@@ -7,6 +7,7 @@ import io
 import hashlib
 import json
 from pathlib import Path
+import shutil
 import re
 import uuid
 from datetime import datetime, timezone
@@ -74,7 +75,6 @@ RAW_SCALE_TOLERANCE = 0.03
 MODEL_MASK_MAX_ATTEMPTS = 3
 POST_MASK_MAX_ATTEMPTS = 3
 MAX_FAILURES = 5
-DONOR_PIPING_MASK_EXPAND = 4
 PROMPT_PID_VALUE = re.compile(r"PID(?P<value>-?\d+)")
 RECENT_DIRNAME = "recent"
 RECENT_SUBMITTED_EDIT_DIR = "submitted/edit"
@@ -116,6 +116,15 @@ def _sanitize_model_tag(model_name: str) -> str:
         cleaned = cleaned[len("models-") :]
     clean = re.sub(r"[^A-Za-z0-9._-]+", "-", cleaned)
     return clean.strip("-") or "model"
+
+
+def _copy_latest_result(latest_dir: str | None, out_path: Path) -> None:
+    if not latest_dir:
+        return
+    target_dir = Path(latest_dir).expanduser()
+    ensure_dir(target_dir)
+    target_path = target_dir / "latest.png"
+    shutil.copyfile(out_path, target_path)
 
 
 def _pid_label(prompt_id: str) -> str:
@@ -647,8 +656,7 @@ def run_pipeline(
     if post_mask_threshold is None:
         post_mask_threshold = model_mask_threshold
     if post_mask_pass:
-        print("[info] post-mask pass disabled; composite uses donor piping mask instead.")
-    post_mask_pass = False
+        print("[info] post-mask pass enabled; will generate piping mask from output.")
     if donor_piping_mask_threshold is None:
         donor_piping_mask_threshold = model_mask_threshold
     if segmentation_mask_pass and model_mask_pass:
@@ -1330,11 +1338,12 @@ def run_pipeline(
                 (donor_meta.width, donor_meta.height),
             )
             print(" [donor-piping-mask] intersected with model cushion mask")
-        if DONOR_PIPING_MASK_EXPAND > 0:
-            kernel = DONOR_PIPING_MASK_EXPAND * 2 + 1
+        donor_piping_mask_expand = max(0, config.donor_piping_mask_expand)
+        if donor_piping_mask_expand > 0:
+            kernel = donor_piping_mask_expand * 2 + 1
             mask_img = mask_img.filter(ImageFilter.MaxFilter(kernel))
             mask_img = mask_img.point(lambda p: 255 if p > 0 else 0)
-            print(f" [donor-piping-mask] expanded by {DONOR_PIPING_MASK_EXPAND}px")
+            print(f" [donor-piping-mask] expanded by {donor_piping_mask_expand}px")
         if config.donor_piping_mask_blur > 0:
             mask_img = mask_img.filter(
                 ImageFilter.GaussianBlur(config.donor_piping_mask_blur)
@@ -1802,6 +1811,7 @@ def run_pipeline(
                         print(" ✔ Converted to Adobe RGB (1998)")
                     else:
                         print(" ⚠ Adobe RGB conversion skipped/failed")
+                _copy_latest_result(config.latest_result_dir, out_path)
                 if config.enforce_dpi:
                     changed, found = ensure_dpi(out_path, config.target_dpi)
                     if changed:
@@ -1946,6 +1956,7 @@ def run_pipeline(
                     print(" ✔ Converted to Adobe RGB (1998)")
                 else:
                     print(" ⚠ Adobe RGB conversion skipped/failed")
+            _copy_latest_result(config.latest_result_dir, out_path)
             if config.enforce_dpi:
                 changed, found = ensure_dpi(out_path, config.target_dpi)
                 if changed:

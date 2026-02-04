@@ -65,6 +65,7 @@ class AppConfig:
     donor_piping_mask_prompt: str | None
     donor_piping_mask_threshold: int
     donor_piping_mask_blur: float
+    donor_piping_mask_expand: int
     assets_dir: Path = ASSETS_DIR
     output_dir: Path = OUTPUT_DIR
     prompts_dir: Path = PROMPTS_DIR
@@ -74,6 +75,7 @@ class AppConfig:
     composite_original_donor: bool = False
     final_saturation: float = 1.0
     final_hue_shift: float = 0.0
+    latest_result_dir: str | None = None
 
 
 def _env_flag(name: str, default: bool = False) -> bool:
@@ -158,7 +160,7 @@ def load_config() -> AppConfig:
     piping_ref_max = _env_int("PIPING_REF_MAX")
     if piping_ref_max is None:
         piping_ref_max = 4
-    post_mask_pass = _env_flag("POST_MASK_PASS", default=True)
+    post_mask_pass = _env_flag("POST_MASK_PASS", default=False)
     post_mask_prompt = _env_str("POST_MASK_PROMPT")
     post_mask_threshold = _env_int("POST_MASK_THRESHOLD")
     if post_mask_threshold is None:
@@ -174,6 +176,9 @@ def load_config() -> AppConfig:
     if donor_piping_mask_threshold is None:
         donor_piping_mask_threshold = model_mask_threshold
     donor_piping_mask_blur = _env_float("DONOR_PIPING_MASK_BLUR", 0.0)
+    donor_piping_mask_expand = _env_int("DONOR_PIPING_MASK_EXPAND")
+    if donor_piping_mask_expand is None:
+        donor_piping_mask_expand = 2
     mask_blur_radius = _env_int("MASK_BLUR_RADIUS")
     if mask_blur_radius is None:
         mask_blur_radius = 0
@@ -228,8 +233,10 @@ def load_config() -> AppConfig:
         donor_piping_mask_prompt=donor_piping_mask_prompt,
         donor_piping_mask_threshold=donor_piping_mask_threshold,
         donor_piping_mask_blur=donor_piping_mask_blur,
+        donor_piping_mask_expand=donor_piping_mask_expand,
         mask_blur_radius=mask_blur_radius,
         composite_original_donor=composite_original_donor,
         final_saturation=_env_float("FINAL_SATURATION", 1.0),
         final_hue_shift=_env_float("FINAL_HUE_SHIFT", 0.0),
+        latest_result_dir=_env_str("LATEST_RESULT_DIR"),
     )

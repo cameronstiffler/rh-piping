@@ -22,6 +22,18 @@ Python tooling for piping-focused furniture edits via AI image APIs.
 
 `python -m rh_piping --dry-run`
 
+## Fast iteration (reuse last API result)
+
+If you want to tweak post settings without re-calling the API, set `SKIP_API_CALLS=true`.
+
+## Pipe-path QA scoring (optional)
+
+If `PIPE_PATH_PNG` is set (see `.env.example`), each run writes:
+- `output/<product>/recent/returned/post/*pipe_path_score*.json`
+- `output/<product>/recent/returned/post/*cal_mask_pipe_path*.png`
+
+This does not change masking/editing; it only helps quantify “non-piping pixels unchanged” vs “piping path changed”.
+
 ## Run using Prompt found in prompts/ with PID #
 
 `python -m rh_piping --pid 1`

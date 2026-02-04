@@ -57,6 +57,10 @@ from rh_piping.masks import (
     find_mask_for_product,
 )
 from rh_piping.prompts import prompt_id_from_path
+from rh_piping.quality import (
+    parse_pipe_path_rgb_env,
+    score_result_against_donor_along_pipe_path,
+)
 
 ORIGINAL_ROOT = "original"
 DONOR_DIRNAME = "donor_image"
@@ -2043,6 +2047,52 @@ def run_pipeline(
                 ),
                 post_bytes,
             )
+            if config.pipe_path_png:
+                pipe_path_path = Path(config.pipe_path_png)
+                if pipe_path_path.exists():
+                    try:
+                        pipe_rgb = parse_pipe_path_rgb_env(config.pipe_path_rgb) or (
+                            255,
+                            73,
+                            73,
+                        )
+                        donor_bytes = job.donor_processed.read_bytes()
+                        score, pipe_region = score_result_against_donor_along_pipe_path(
+                            donor_png=donor_bytes,
+                            result_png=output_bytes,
+                            pipe_path_png=pipe_path_path.read_bytes(),
+                            path_rgb=pipe_rgb,
+                            color_tol=config.pipe_path_color_tol,
+                            expand_px=config.pipe_path_expand,
+                            change_threshold=config.pipe_path_change_threshold,
+                        )
+                        print(
+                            " [pipe-path] changed(pipe) "
+                            f"{score.changed_pipe_pct:.4f} "
+                            f"changed(non-pipe) {score.changed_non_pipe_pct:.6f} "
+                            f"meanΔ(pipe) {score.mean_diff_pipe:.2f} "
+                            f"meanΔ(non-pipe) {score.mean_diff_non_pipe:.3f}"
+                        )
+                        _write_recent_file(
+                            out_dir,
+                            RECENT_RETURNED_POST_DIR,
+                            _recent_filename(
+                                "pipe_path_score", ".json", recent_tag_result
+                            ),
+                            score.to_json().encode("utf-8"),
+                        )
+                        pipe_mask_png = io.BytesIO()
+                        pipe_region.save(pipe_mask_png, format="PNG")
+                        _write_recent_file(
+                            out_dir,
+                            RECENT_RETURNED_POST_DIR,
+                            _recent_filename(
+                                "cal_mask_pipe_path", ".png", recent_tag_result
+                            ),
+                            pipe_mask_png.getvalue(),
+                        )
+                    except Exception as exc:
+                        print(f" ⚠ [pipe-path] scoring failed: {exc}")
             generated += 1
             result_index += 1
 

@@ -66,6 +66,11 @@ class AppConfig:
     donor_piping_mask_threshold: int
     donor_piping_mask_blur: float
     donor_piping_mask_expand: int
+    pipe_path_png: str | None
+    pipe_path_rgb: str | None
+    pipe_path_color_tol: int
+    pipe_path_expand: int
+    pipe_path_change_threshold: int
     assets_dir: Path = ASSETS_DIR
     output_dir: Path = OUTPUT_DIR
     prompts_dir: Path = PROMPTS_DIR
@@ -162,6 +167,12 @@ def load_config() -> AppConfig:
     if piping_ref_max is None:
         piping_ref_max = 4
     post_mask_pass = _env_flag("POST_MASK_PASS", default=False)
+    if post_mask_pass:
+        raise RuntimeError(
+            "POST_MASK_PASS is disabled in this repo. "
+            "Do not generate or use post-edit piping masks; use the donor piping mask "
+            "intersected with the model cushion mask instead."
+        )
     post_mask_prompt = _env_str("POST_MASK_PROMPT")
     post_mask_threshold = _env_int("POST_MASK_THRESHOLD")
     if post_mask_threshold is None:
@@ -180,6 +191,11 @@ def load_config() -> AppConfig:
     donor_piping_mask_expand = _env_int("DONOR_PIPING_MASK_EXPAND")
     if donor_piping_mask_expand is None:
         donor_piping_mask_expand = 2
+    pipe_path_png = _env_str("PIPE_PATH_PNG")
+    pipe_path_rgb = _env_str("PIPE_PATH_RGB")  # e.g. "255,73,73"
+    pipe_path_color_tol = _env_int("PIPE_PATH_COLOR_TOL") or 40
+    pipe_path_expand = _env_int("PIPE_PATH_EXPAND") or 8
+    pipe_path_change_threshold = _env_int("PIPE_PATH_CHANGE_THRESHOLD") or 8
     mask_blur_radius = _env_int("MASK_BLUR_RADIUS")
     if mask_blur_radius is None:
         mask_blur_radius = 0
@@ -235,6 +251,11 @@ def load_config() -> AppConfig:
         donor_piping_mask_threshold=donor_piping_mask_threshold,
         donor_piping_mask_blur=donor_piping_mask_blur,
         donor_piping_mask_expand=donor_piping_mask_expand,
+        pipe_path_png=pipe_path_png,
+        pipe_path_rgb=pipe_path_rgb,
+        pipe_path_color_tol=pipe_path_color_tol,
+        pipe_path_expand=pipe_path_expand,
+        pipe_path_change_threshold=pipe_path_change_threshold,
         mask_blur_radius=mask_blur_radius,
         composite_original_donor=composite_original_donor,
         final_saturation=_env_float("FINAL_SATURATION", 1.0),

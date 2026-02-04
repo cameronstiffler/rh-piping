@@ -1165,6 +1165,9 @@ def composite_with_mask(
     output_bytes: bytes,
     donor_path: Path,
     mask_bytes: bytes,
+    *,
+    erode_px: int = 0,
+    feather_px: float = 0.0,
 ) -> bytes:
     with Image.open(io.BytesIO(output_bytes)) as out_img:
         out_img = ImageOps.exif_transpose(out_img).convert("RGBA")
@@ -1178,6 +1181,11 @@ def composite_with_mask(
         mask_img = ImageOps.exif_transpose(mask_img).convert("L")
     if mask_img.size != donor_rgb.size:
         mask_img = ImageOps.fit(mask_img, donor_rgb.size, Image.NEAREST, centering=(0.5, 0.5))
+    if erode_px > 0:
+        kernel = erode_px * 2 + 1
+        mask_img = mask_img.filter(ImageFilter.MinFilter(size=kernel))
+    if feather_px > 0:
+        mask_img = mask_img.filter(ImageFilter.GaussianBlur(radius=float(feather_px)))
     if out_rgb.size != donor_rgb.size:
         out_rgb = ImageOps.fit(out_rgb, donor_rgb.size, Image.LANCZOS, centering=(0.5, 0.5))
     merged = Image.composite(out_rgb, donor_rgb, mask_img)

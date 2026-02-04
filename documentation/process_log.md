@@ -18,8 +18,8 @@ Append new runs at the bottom.
      - `output/<product>/masks/<short>_PID-<PID>_mask.png`
      - `output/<product>/recent/returned/mask/model_cushion_mask_*.png`
    - Usage:
-     - Used as the **edit mask** and **composite mask**.
-     - Also used to constrain the donor piping mask (intersection).
+     - Used as the **edit mask** (limits what the model may change).
+     - Used to constrain the donor piping mask (intersection) before compositing.
 
 4) **Donor piping mask (pre-edit, required)**
    - Prompt: `prompts/mask_pass/mask_prompt_MID-<PID>_donor_piping.md`
@@ -29,13 +29,13 @@ Append new runs at the bottom.
    - Submitted donor:
      - `output/<product>/recent/submitted/mask/donor_piping_donor_*.png`
    - Usage:
-     - Diagnostic/QA only (not used for edit/composite).
+     - Intersected with the model cushion mask, then used as the **composite mask**.
 
 5) **Submit edit request**
    - Edit mask (padded): `output/<product>/recent/submitted/edit/edit_mask_*.png` (derived from model cushion mask)
    - Donor submitted: `output/<product>/recent/submitted/edit/edit_donor_*.png`
    - Color ref (processed): `assets/processed/color_reference/<name>.png`
-- Piping refs (processed): `assets/processed/piping_ref_images/*.png`
+   - Piping refs (processed): `assets/processed/piping_ref_images/*.png`
 
 6) **Model output (fit to donor proportions)**
    - `output/<product>/recent/returned/result/edit_raw_*.png`
@@ -48,6 +48,9 @@ Append new runs at the bottom.
 8) **Post composite (final)**
    - Final output: `output/<product>/<short>_PID-<PID>_<model>_F*_R<idx>.png`
    - Optional calibration overlay (only when explicitly requested): `output/<product>/recent/returned/post/cal_mask_*.png`
+   - Optional QA-only pipe-path scoring artifacts:
+     - `output/<product>/recent/returned/post/*pipe_path_score*.json`
+     - `output/<product>/recent/returned/post/*cal_mask_pipe_path*.png`
 
 ## Run Log (Append Below)
 
@@ -101,3 +104,9 @@ Append new runs at the bottom.
 - Mask (used): `output/Provence_Sofa112in_NaturalWeave_prod34270121_F_CC/masks/ProvenceSo1bf4_PID-7_mask.png`
 - Output: `output/Provence_Sofa112in_NaturalWeave_prod34270121_F_CC/ProvenceSo1bf4_PID-7_gemini849_FM_R52.png`
 - Notes: Pad guard still active; donor piping mask now the default composite mask so cushion areas outside piping stay untouched while the donor mask defines where the pipes change.
+
+### 2026-02-04 (Wed) — PID-7 (canonical flow locked)
+- Date: 2026-02-04
+- Notes:
+  - Canonical workflow is now: **model cushion mask for edit** + **donor piping mask (intersect cushion) for composite**.
+  - Post-mask generation from edited output is disabled and not used.

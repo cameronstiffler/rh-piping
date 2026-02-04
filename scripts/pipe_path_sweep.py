@@ -50,6 +50,9 @@ def _run_once(
     env["POST_MASK_PASS"] = "0"
     env["DONOR_PIPING_MASK_EXPAND"] = str(expand)
     env["DONOR_PIPING_MASK_BLUR"] = str(blur)
+    # Composite edge controls (optional; sweep may override).
+    env.setdefault("COMPOSITE_MASK_ERODE", "0")
+    env.setdefault("COMPOSITE_MASK_FEATHER", "0.0")
     env["PIPE_PATH_PNG"] = pipe_path_png
     env.setdefault("PIPE_PATH_RGB", "255,73,73")
     env.setdefault("PIPE_PATH_COLOR_TOL", "40")
@@ -85,14 +88,19 @@ def main() -> int:
     args = build_parser().parse_args()
     output_dir: Path = args.output_dir
 
-    schedule: list[tuple[int, float]] = []
-    # 12-step default schedule: grow coverage first, then soften edges.
-    expands = [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 14]
+    schedule: list[tuple[int, float, int, float]] = []
+    # 12-step default schedule:
+    # - increase coverage (expand)
+    # - introduce small feathering only after some coverage exists
+    # - add slight erode when feathering to reduce bleed/halos
+    expands = [3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 14, 14]
     blurs = [0.0] * 6 + [0.8] * 6
+    erodes = [0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 2, 2]
+    feathers = [0.0] * 6 + [0.4, 0.4, 0.6, 0.6, 0.8, 1.0]
     for i in range(min(args.iters, len(expands))):
-        schedule.append((expands[i], blurs[i]))
+        schedule.append((expands[i], blurs[i], erodes[i], feathers[i]))
     while len(schedule) < args.iters:
-        schedule.append((expands[-1], blurs[-1]))
+        schedule.append((expands[-1], blurs[-1], erodes[-1], feathers[-1]))
 
     rows: list[SweepRow] = []
     start = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
@@ -102,9 +110,14 @@ def main() -> int:
     if args.skip_api_calls and last_score is None:
         print("[sweep] No prior score found; warmup run will call the API once.")
 
-    for i, (expand, blur) in enumerate(schedule, start=1):
+    for i, (expand, blur, erode, feather) in enumerate(schedule, start=1):
         before = _latest_score_json(output_dir, args.product)
-        print(f"[sweep] iter={i}/{args.iters} expand={expand} blur={blur}")
+        print(
+            f"[sweep] iter={i}/{args.iters} expand={expand} blur={blur} "
+            f"erode={erode} feather={feather}"
+        )
+        os.environ["COMPOSITE_MASK_ERODE"] = str(erode)
+        os.environ["COMPOSITE_MASK_FEATHER"] = str(feather)
         _run_once(
             pid=args.pid,
             product=args.product,

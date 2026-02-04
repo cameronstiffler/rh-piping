@@ -59,6 +59,7 @@ from rh_piping.masks import (
 from rh_piping.prompts import prompt_id_from_path
 from rh_piping.quality import (
     parse_pipe_path_rgb_env,
+    score_boundary_halo,
     score_result_against_donor_along_pipe_path,
 )
 
@@ -1390,10 +1391,16 @@ def run_pipeline(
                 model_cushion_mask_image,
                 (donor_meta.width, donor_meta.height),
             )
-        if config.mask_blur_radius > 0:
+        if config.edit_mask_erode > 0:
+            kernel = config.edit_mask_erode * 2 + 1
+            edit_mask_image = edit_mask_image.filter(ImageFilter.MinFilter(kernel))
+            edit_mask_image = edit_mask_image.point(lambda p: 255 if p > 0 else 0)
+            print(f" [edit-mask] eroded by {config.edit_mask_erode}px")
+        if config.edit_mask_blur_radius > 0:
             edit_mask_image = edit_mask_image.filter(
-                ImageFilter.GaussianBlur(radius=config.mask_blur_radius)
+                ImageFilter.GaussianBlur(radius=float(config.edit_mask_blur_radius))
             )
+            print(f" [edit-mask] blurred by {config.edit_mask_blur_radius}px")
         mask_bytes = build_square_mask_input(
             edit_mask_image,
             target_size=donor_model_size,
@@ -1810,12 +1817,48 @@ def run_pipeline(
                         composite_mask_bytes,
                         (donor_meta.width, donor_meta.height),
                     )
+                    try:
+                        donor_bytes = job.donor_processed.read_bytes()
+                        halo_score, halo_ring = score_boundary_halo(
+                            donor_png=donor_bytes,
+                            result_png=aligned_bytes,
+                            composite_mask_png=donor_mask_bytes,
+                            ring_outer_px=6,
+                            change_threshold=8,
+                        )
+                        print(
+                            " [edge] ring changed "
+                            f"{halo_score.changed_ring_pct:.6f} "
+                            f"meanΔ(ring/out) {halo_score.mean_diff_ring_outside:.3f}"
+                        )
+                        _write_recent_file(
+                            out_dir,
+                            RECENT_RETURNED_POST_DIR,
+                            _recent_filename("edge_halo_score", ".json", recent_tag_result),
+                            halo_score.to_json().encode("utf-8"),
+                        )
+                        ring_png = io.BytesIO()
+                        halo_ring.save(ring_png, format="PNG")
+                        _write_recent_file(
+                            out_dir,
+                            RECENT_RETURNED_POST_DIR,
+                            _recent_filename("cal_mask_edge_ring", ".png", recent_tag_result),
+                            ring_png.getvalue(),
+                        )
+                    except Exception as exc:
+                        print(f" ⚠ [edge] halo scoring failed: {exc}")
                     output_bytes = composite_with_mask(
                         aligned_bytes,
                         composite_donor_path,
                         donor_mask_bytes,
+                        erode_px=config.composite_mask_erode,
+                        feather_px=config.composite_mask_feather,
                     )
-                    print(" [post] composited piping onto donor via cushion mask")
+                    print(
+                        " [post] composited piping onto donor "
+                        f"(erode={config.composite_mask_erode}px "
+                        f"feather={config.composite_mask_feather}px)"
+                    )
                 raw_attempts = 0
                 preview_bytes = None
                 if preview_bg_color:

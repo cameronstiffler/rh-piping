@@ -5,7 +5,7 @@ This log captures notable work, decisions, and approach changes. Append new entr
 ## 2026-01-29 to 2026-01-31 (Thu–Sat)
 
 ### Summary
-- Built/iterated MID mask prompt and ran model-mask pass to generate piping masks and edits.
+- Built/iterated MID mask prompt and ran model-mask pass to generate masks and edits.
 - Added “recent” artifact capture for submitted/returned files and post-processed outputs.
 - Added run-identifying tags to recent filenames (PID, model tag, UTC stamp, short run id, result index).
 - Allowed prompt filenames to include custom suffixes after PID.
@@ -23,8 +23,7 @@ This log captures notable work, decisions, and approach changes. Append new entr
 ### Approaches and why we switched
 - **Mask generation approach**
   - Started with model-mask pass for fast, prompt-driven masks.
-  - Kept SAM2 as optional (external) path when needed.
-  - Rationale: model-mask pass is faster and integrates directly with the prompt; SAM2 remains useful for certain mask types.
+  - Rationale: model-mask pass is faster and integrates directly with the prompt.
 - **Submitted/returned artifact capture**
   - Initial idea: global `output/submitted/`.
   - Switched to `output/<product>/submitted/` to avoid cross-product collisions.
@@ -74,7 +73,7 @@ This log captures notable work, decisions, and approach changes. Append new entr
 
 ### What we did
 - Model mask bytes are now multiplied by donor alpha before use/saving.
-- SAM2 masks are clipped to donor alpha before save.
+- Auto-generated masks are clipped to donor alpha before save.
 
 ### Approaches and why we switched
 - You observed masks leaking above the donor; we now hard‑clip to silhouette.
@@ -283,14 +282,14 @@ This log captures notable work, decisions, and approach changes. Append new entr
 ## 2026-01-31 (Sat)
 
 ### Summary
-- Added Vertex SAM2 endpoint support for mask generation (optional via env/CLI).
+- Added optional Vertex endpoint support for mask generation (later removed).
 
 ### What we did
 - Added `SAM2_VERTEX_ENDPOINT`/`SAM2_VERTEX_LOCATION` config + CLI overrides.
-- Implemented Vertex PredictionService SAM2 calls and mask parsing/selection.
+- Implemented Vertex PredictionService calls and mask parsing/selection.
 
 ### Approaches and why we switched
-- You asked to call SAM2 on Vertex instead of the Hugging Face space.
+- You asked to call the mask generator on Vertex instead of a hosted space.
 
 ---
 
@@ -324,52 +323,52 @@ This log captures notable work, decisions, and approach changes. Append new entr
 ## 2026-01-31 (Sat)
 
 ### Summary
-- Added optional local SAM2 (Transformers) mask generation path.
+- Added optional local (Transformers) mask generation path (later removed).
 
 ### What we did
-- Added `SAM2_LOCAL_MODEL` config/CLI support and a local SAM2 mask runner.
+- Added local mask runner config/CLI support (later removed).
 
 ### Approaches and why we switched
-- You want to try SAM2 locally with the large model.
+- You want to try local mask generation with the large model.
 
 ---
 
 ## 2026-01-31 (Sat)
 
 ### Summary
-- Disabled Gemini model-mask pass when SAM2 mask generation is enabled.
+- Disabled Gemini model-mask pass when external mask generation is enabled.
 
 ### What we did
 - Pipeline now turns off model mask pass whenever `--generate-mask` is used.
 
 ### Approaches and why we switched
-- You want SAM2 to be the only mask source.
+- You want the external mask generator to be the only mask source.
 
 ---
 
 ## 2026-01-31 (Sat)
 
 ### Summary
-- Constrained local SAM2 prompts to cushion regions and refined masks to avoid wicker.
+- Constrained local mask prompts to cushion regions and refined masks to avoid wicker.
 
 ### What we did
-- Added a cushion-body mask to sample foreground points and to refine SAM2 masks.
+- Added a cushion-body mask to sample foreground points and to refine masks.
 
 ### Approaches and why we switched
-- The SAM2 auto mask was picking wicker/arms; we now bias toward upholstery.
+- The auto mask was picking wicker/arms; we now bias toward upholstery.
 
 ---
 
 ## 2026-01-31 (Sat)
 
 ### Summary
-- Added SAM2 target mode to generate cushion masks (positive = cushions).
+- Added target mode to generate cushion masks (positive = cushions).
 
 ### What we did
 - Added `SAM2_TARGET` (piping/cushions) and cushion‑focused prompting/scoring.
 
 ### Approaches and why we switched
-- You want a cushion‑only positive mask from SAM2.
+- You want a cushion‑only positive mask from the auto masker.
 
 ---
 
@@ -505,7 +504,7 @@ YYYY-MM-DD
 - Mask: `assets/masks/Provence_Sofa112in_NaturalWeave_prod34270121_F_CC_cushion.png` (4096x1204)
 - Output: `output/Provence_Sofa112in_NaturalWeave_prod34270121_F_CC/ProvenceSo1bf4_PID-7_gemini849_FM_R1.png` (4096x1204)
 - Notes:
-  - Cushion mask pass disables model mask/segmentation/SAM2 mask paths.
+  - Cushion mask pass disables model mask/segmentation/auto-mask paths.
   - Mask coverage: ~6.03% of pixels.
   - Mask pixels outside donor alpha: 0.00%.
   - Mask bbox: (37, 57)–(3655, 1085); donor bbox: (28, 50)–(4068, 1179).
@@ -554,13 +553,13 @@ YYYY-MM-DD
 ## 2026-02-02 (Mon)
 
 ### Summary
-- Removed SAM2 and cushion-mask feature usage; model mask is now the primary path.
+- Removed external auto-mask and cushion-mask feature usage; model mask is now the primary path.
 - Added/updated mask and image reference documentation.
 
 ### What we did
 - Deleted cushion-mask CLI/config options and removed cushion-mask logic from the pipeline.
-- Removed SAM2 CLI/config options and generation paths.
-- Updated `.env.example` to remove SAM2/cushion settings.
+- Removed external auto-mask CLI/config options and generation paths.
+- Updated `.env.example` to remove external auto-mask/cushion settings.
 - Updated `documentation/masks_and_images.md` to reflect current mask/image types and note disabled features.
 
 ---
@@ -569,7 +568,7 @@ YYYY-MM-DD
 
 ### Summary
 - Removed diff-mask feature; pipeline no longer builds or saves output-diff masks.
-- Removed SAM2 and cushion-mask support; runs now fail if requested.
+- Removed external auto-mask and cushion-mask support; runs now fail if requested.
 - Model mask is the primary mask path.
 
 ---

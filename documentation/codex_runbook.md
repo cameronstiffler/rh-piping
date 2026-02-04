@@ -8,7 +8,7 @@ Produce **photorealistic** furniture edits where **only the seam piping material
 
 ## Workflow rules (non‑negotiable)
 
-- **Do not use SAM2** under any circumstance.
+- **Do not use any external auto-masking system** under any circumstance.
 - **Do not reintroduce the old cushion-mask feature** (removed; unrelated to the model cushion mask).
 - **Do not use diff masks** or fall back to them.
 - **Exactly 1 result** per run (don’t add `--results` unless explicitly requested).
@@ -67,4 +67,3 @@ Use these refs for QA scoring/heuristics (edge realism, avoid halos/double-lines
 ## When to ask first
 
 Ask before adding any new fundamental masks, changing mask types, or introducing new external dependencies.
-

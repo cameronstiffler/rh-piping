@@ -71,12 +71,16 @@ class AppConfig:
     pipe_path_color_tol: int
     pipe_path_expand: int
     pipe_path_change_threshold: int
+    composite_mask_erode: int
+    composite_mask_feather: float
     assets_dir: Path = ASSETS_DIR
     output_dir: Path = OUTPUT_DIR
     prompts_dir: Path = PROMPTS_DIR
     processed_dir: Path = PROCESSED_DIR
     masks_dir: Path = MASKS_DIR
     mask_blur_radius: int = 0
+    edit_mask_erode: int = 0
+    edit_mask_blur_radius: float = 0.0
     composite_original_donor: bool = False
     final_saturation: float = 1.0
     final_hue_shift: float = 0.0
@@ -196,9 +200,17 @@ def load_config() -> AppConfig:
     pipe_path_color_tol = _env_int("PIPE_PATH_COLOR_TOL") or 40
     pipe_path_expand = _env_int("PIPE_PATH_EXPAND") or 8
     pipe_path_change_threshold = _env_int("PIPE_PATH_CHANGE_THRESHOLD") or 8
+    composite_mask_erode = _env_int("COMPOSITE_MASK_ERODE")
+    if composite_mask_erode is None:
+        composite_mask_erode = 0
+    composite_mask_feather = _env_float("COMPOSITE_MASK_FEATHER", 0.0)
     mask_blur_radius = _env_int("MASK_BLUR_RADIUS")
     if mask_blur_radius is None:
         mask_blur_radius = 0
+    edit_mask_erode = _env_int("EDIT_MASK_ERODE")
+    if edit_mask_erode is None:
+        edit_mask_erode = 0
+    edit_mask_blur_radius = _env_float("EDIT_MASK_BLUR_RADIUS", 0.0)
     composite_original_donor = _env_flag("COMPOSITE_ORIGINAL_DONOR", default=False)
 
     return AppConfig(
@@ -256,7 +268,11 @@ def load_config() -> AppConfig:
         pipe_path_color_tol=pipe_path_color_tol,
         pipe_path_expand=pipe_path_expand,
         pipe_path_change_threshold=pipe_path_change_threshold,
+        composite_mask_erode=composite_mask_erode,
+        composite_mask_feather=composite_mask_feather,
         mask_blur_radius=mask_blur_radius,
+        edit_mask_erode=edit_mask_erode,
+        edit_mask_blur_radius=edit_mask_blur_radius,
         composite_original_donor=composite_original_donor,
         final_saturation=_env_float("FINAL_SATURATION", 1.0),
         final_hue_shift=_env_float("FINAL_HUE_SHIFT", 0.0),

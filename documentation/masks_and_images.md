@@ -108,5 +108,5 @@ All run artifacts are stored under:
 
 - Post composite always applies donor alpha, so pixels outside the donor silhouette remain transparent.
 - The edit mask sent to the model is padded to the model input size.
-- SAM2, cushion-mask, and diff-mask features are disabled; the pipeline will fail if they are requested.
+- Cushion-mask and diff-mask features are disabled; the pipeline will fail if they are requested.
 - If you change mask locations or add new mask types, update this file.

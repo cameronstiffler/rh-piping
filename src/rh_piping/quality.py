@@ -30,6 +30,107 @@ class PipePathScore:
         return json.dumps(asdict(self), indent=2, sort_keys=True)
 
 
+@dataclass(frozen=True)
+class BoundaryHaloScore:
+    ring_pixels: int
+    changed_ring_pixels: int
+    changed_ring_pct: float
+    mean_diff_ring: float
+    mean_diff_ring_outside: float
+
+    def to_json(self) -> str:
+        return json.dumps(asdict(self), indent=2, sort_keys=True)
+
+
+def build_boundary_ring(
+    mask_l: Image.Image,
+    *,
+    outer_px: int = 6,
+    inner_px: int = 0,
+) -> Image.Image:
+    """Return a binary ring mask around the provided binary/gray mask.
+
+    `outer_px` dilates outward; `inner_px` optionally erodes inward before differencing.
+    """
+    mask = mask_l.convert("L")
+    mask_bin = mask.point(lambda p: 255 if p > 0 else 0)
+    if outer_px <= 0:
+        return Image.new("L", mask_bin.size, 0)
+    outer_kernel = outer_px * 2 + 1
+    dilated = mask_bin.filter(ImageFilter.MaxFilter(size=outer_kernel))
+    inner = mask_bin
+    if inner_px > 0:
+        inner_kernel = inner_px * 2 + 1
+        inner = inner.filter(ImageFilter.MinFilter(size=inner_kernel))
+    ring = ImageChops.subtract(dilated, inner).point(lambda p: 255 if p > 0 else 0)
+    return ring
+
+
+def score_boundary_halo(
+    *,
+    donor_png: bytes,
+    result_png: bytes,
+    composite_mask_png: bytes,
+    ring_outer_px: int = 6,
+    change_threshold: int = 8,
+) -> tuple[BoundaryHaloScore, Image.Image]:
+    """Measure changes in a narrow band around the composite mask boundary.
+
+    This is a practical proxy for halos/bleed: pixels just outside the composite
+    region should remain very close to the donor.
+    """
+    with Image.open(io.BytesIO(donor_png)) as donor_im:
+        donor_im = ImageOps.exif_transpose(donor_im).convert("RGBA")
+    with Image.open(io.BytesIO(result_png)) as result_im:
+        result_im = ImageOps.exif_transpose(result_im).convert("RGBA")
+    with Image.open(io.BytesIO(composite_mask_png)) as mask_im:
+        mask_im = ImageOps.exif_transpose(mask_im).convert("L")
+
+    if donor_im.size != result_im.size:
+        raise ValueError(
+            f"Donor/result size mismatch: donor={donor_im.size} result={result_im.size}"
+        )
+    if mask_im.size != donor_im.size:
+        mask_im = mask_im.resize(donor_im.size, Image.Resampling.NEAREST)
+
+    donor_alpha = donor_im.getchannel("A").point(lambda p: 255 if p > 0 else 0)
+    mask_bin = mask_im.point(lambda p: 255 if p > 0 else 0)
+    ring = build_boundary_ring(mask_bin, outer_px=ring_outer_px, inner_px=0)
+    ring = ImageChops.multiply(ring, donor_alpha).point(lambda p: 255 if p > 0 else 0)
+    ring_outside = ImageChops.multiply(ring, ImageChops.subtract(donor_alpha, mask_bin))
+
+    donor_rgb = donor_im.convert("RGB")
+    result_rgb = result_im.convert("RGB")
+    diff_l = ImageChops.difference(donor_rgb, result_rgb).convert("L")
+
+    ring_pixels = ring.histogram()[255]
+    ring_out_pixels = ring_outside.histogram()[255]
+
+    diff_ring = ImageChops.multiply(diff_l, ring)
+    diff_ring_out = ImageChops.multiply(diff_l, ring_outside)
+
+    def _mean(masked: Image.Image, denom: int) -> float:
+        if denom <= 0:
+            return 0.0
+        hist = masked.histogram()
+        total = 0
+        for v, n in enumerate(hist):
+            total += v * n
+        return total / denom
+
+    diff_bin = diff_l.point(lambda p: 255 if p >= change_threshold else 0)
+    changed_ring = ImageChops.multiply(diff_bin, ring).histogram()[255]
+
+    score = BoundaryHaloScore(
+        ring_pixels=ring_pixels,
+        changed_ring_pixels=changed_ring,
+        changed_ring_pct=(changed_ring / ring_pixels) if ring_pixels else 0.0,
+        mean_diff_ring=_mean(diff_ring, ring_pixels),
+        mean_diff_ring_outside=_mean(diff_ring_out, ring_out_pixels),
+    )
+    return score, ring
+
+
 def _parse_rgb_triplet(value: str) -> tuple[int, int, int]:
     parts = [p.strip() for p in value.split(",")]
     if len(parts) != 3:
@@ -163,4 +264,3 @@ def parse_pipe_path_rgb_env(value: str | None) -> tuple[int, int, int] | None:
     if not value:
         return None
     return _parse_rgb_triplet(value)
-

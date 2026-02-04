@@ -1,0 +1,1 @@
+dude, I love you all but why are you talking about about what time my code checkins are? It seem malicious. I dont have problem with anyone but youve been picking on me since day 1. please stop.

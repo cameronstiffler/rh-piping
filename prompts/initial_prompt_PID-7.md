@@ -1,4 +1,3 @@
-<!--Shhhhh...I appreciate you keeping me honest but you are being too negative...IM not hiding anything but stop emailing people this stuff please. I dont have time to clean everything up at the moment.  For perspective, Some of our coworkers have suggested I do this in photoshop-->
 Task: High-fidelity image manipulation of the sofa in Donor Image. Change appearance of stitch seam piping material on sofa upholstery to match swatch in Color Reference Image. Only the color of the seam piping material is changed and the rest of the Result Image remains identical to the original Donor Image.
 
 Core Subject: The pipes on the sofa upholstery from the Donor Image need to be found and surgically recolored so they match the swatch in Color Reference Image. Do NOT add new piping, do NOT create a second line, and do NOT shift the pipe position. Recolor in-place only.

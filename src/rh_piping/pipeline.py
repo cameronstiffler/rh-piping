@@ -1338,6 +1338,7 @@ def run_pipeline(
                 (donor_meta.width, donor_meta.height),
             )
             print(" [donor-piping-mask] intersected with model cushion mask")
+        edit_mask_base = mask_img.copy()
         donor_piping_mask_expand = max(0, config.donor_piping_mask_expand)
         if donor_piping_mask_expand > 0:
             kernel = donor_piping_mask_expand * 2 + 1
@@ -1371,6 +1372,29 @@ def run_pipeline(
         if mask_only:
             print("[mask-only] mask generated; skipping edit/post generation.")
             continue
+
+        # Constrain edit pass to donor piping mask (intersected with cushion mask).
+        edit_mask_image = edit_mask_base
+        if model_cushion_mask_image is not None:
+            edit_mask_image = _intersect_mask_images(
+                edit_mask_image,
+                model_cushion_mask_image,
+                (donor_meta.width, donor_meta.height),
+            )
+        if config.mask_blur_radius > 0:
+            edit_mask_image = edit_mask_image.filter(
+                ImageFilter.GaussianBlur(radius=config.mask_blur_radius)
+            )
+        mask_bytes = build_square_mask_input(
+            edit_mask_image,
+            target_size=donor_model_size,
+            square_size=(max(donor_model_size), max(donor_model_size)),
+        )
+        mask_api_bytes, _ = pad_image_bytes(
+            mask_bytes,
+            target_size=(max(donor_model_size), max(donor_model_size)),
+            background_color=(0, 0, 0),
+        )
 
         print("[submission]")
         print(

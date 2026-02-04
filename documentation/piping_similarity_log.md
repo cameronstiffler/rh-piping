@@ -1,0 +1,398 @@
+---
+## 2026-02-02 08:10:15 UTC
+- Reference: `assets/example/pipeexample.png`
+- Output: `output/Provence_Sofa112in_NaturalWeave_prod34270121_F_CC/ProvenceSo1bf4_PID-7_gemini849_FM_R6.png`
+- Similarity (IoU): 0.0000 (FAIL, target 0.80)
+- Best shift_y: -120px
+- Edge percentile: 0.90
+- Fabric threshold: 150
+- Dilate: 1
+- Shift search: -120..120 step 4
+- Reference size: 4096x1204
+- Output size: 4096x1204 (resized=False)
+---
+## 2026-02-02 08:10:40 UTC
+- Reference: `assets/example/pipeexample.png`
+- Output: `output/Provence_Sofa112in_NaturalWeave_prod34270121_F_CC/ProvenceSo1bf4_PID-7_gemini849_FM_R6.png`
+- Similarity (IoU): 0.0000 (FAIL, target 0.80)
+- Best shift_y: -60px
+- Edge percentile: 0.70
+- Fabric threshold: 120
+- Dilate: 2
+- Shift search: -60..60 step 2
+- Reference size: 4096x1204
+- Output size: 4096x1204 (resized=False)
+---
+## 2026-02-02 08:11:25 UTC
+- Reference: `assets/example/pipeexample.png`
+- Output: `output/Provence_Sofa112in_NaturalWeave_prod34270121_F_CC/ProvenceSo1bf4_PID-7_gemini849_FM_R6.png`
+- Similarity (IoU): 0.0000 (FAIL, target 0.80)
+- Best shift_y: -60px
+- Edge percentile: 0.70
+- Fabric threshold: 120
+- Dilate: 2
+- Shift search: -60..60 step 2
+- Reference size: 4096x1204
+- Output size: 4096x1204 (resized=False)
+---
+## 2026-02-02 08:15:37 UTC
+- Reference: `assets/example/pipeexample.png`
+- Output: `output/Provence_Sofa112in_NaturalWeave_prod34270121_F_CC/ProvenceSo1bf4_PID-7_gemini849_FM_R6.png`
+- Similarity (IoU): 0.0000 (FAIL, target 0.80)
+- Best shift_y: -40px
+- Edge percentile: 0.85
+- Fabric threshold: 120
+- Dilate: 1
+- Boundary width: 6px
+- Cushion mask: `output/Provence_Sofa112in_NaturalWeave_prod34270121_F_CC/masks/ProvenceSo1bf4_PID-7_mask.png`
+- Shift search: -40..40 step 2
+- Reference size: 4096x1204
+- Output size: 4096x1204 (resized=False)
+- Size match: True (delta 0x0)
+---
+## 2026-02-02 08:16:38 UTC
+- Reference: `assets/example/pipeexample.png`
+- Output: `output/Provence_Sofa112in_NaturalWeave_prod34270121_F_CC/ProvenceSo1bf4_PID-7_gemini849_FM_R6.png`
+- Similarity (IoU): 0.0000 (FAIL, target 0.80)
+- Best shift_y: -40px
+- Edge percentile: 0.85
+- Fabric threshold: 200
+- Dilate: 1
+- Boundary width: 16px
+- Cushion mask: `output/Provence_Sofa112in_NaturalWeave_prod34270121_F_CC/masks/ProvenceSo1bf4_PID-7_mask.png`
+- Shift search: -40..40 step 2
+- Reference size: 4096x1204
+- Output size: 4096x1204 (resized=False)
+- Size match: True (delta 0x0)
+---
+## 2026-02-02 08:25:11 UTC
+- Iteration: 1
+- Command: `python3 -m rh_piping --pid 7 --product Provence_Sofa112in_NaturalWeave_prod34270121_F_CC`
+- Output: `output/Provence_Sofa112in_NaturalWeave_prod34270121_F_CC/ProvenceSo1bf4_PID-7_gemini849_FM_R7.png`
+- Similarity (IoU): 0.0000 (FAIL, target 0.80)
+- Best shift_y: -40px
+- Threshold: 200
+- Shift search: -40..40 step 2
+- Reference size: 4096x1204
+- Output size: 4096x1204 (resized=False)
+- Size match: True (delta 0x0)
+---
+## 2026-02-02 08:27:25 UTC
+- Iteration: 2
+- Command: `python3 -m rh_piping --pid 7 --product Provence_Sofa112in_NaturalWeave_prod34270121_F_CC --post-mask-shift-y -40`
+- Output: `output/Provence_Sofa112in_NaturalWeave_prod34270121_F_CC/ProvenceSo1bf4_PID-7_gemini849_FM_R8.png`
+- Similarity (IoU): 0.0000 (FAIL, target 0.80)
+- Best shift_y: -40px
+- Threshold: 200
+- Shift search: -40..40 step 2
+- Reference size: 4096x1204
+- Output size: 4096x1204 (resized=False)
+- Size match: True (delta 0x0)
+---
+## 2026-02-02 08:29:55 UTC
+- Iteration: 3
+- Command: `python3 -m rh_piping --pid 7 --product Provence_Sofa112in_NaturalWeave_prod34270121_F_CC --post-mask-shift-y -40`
+- Output: `output/Provence_Sofa112in_NaturalWeave_prod34270121_F_CC/ProvenceSo1bf4_PID-7_gemini849_FM_R9.png`
+- Similarity (IoU): 0.0000 (FAIL, target 0.80)
+- Best shift_y: -40px
+- Threshold: 200
+- Shift search: -40..40 step 2
+- Reference size: 4096x1204
+- Output size: 4096x1204 (resized=False)
+- Size match: True (delta 0x0)
+---
+## 2026-02-02 08:34:54 UTC
+- Iteration: 1
+- Command: `python3 -m rh_piping --pid 7 --product Provence_Sofa112in_NaturalWeave_prod34270121_F_CC`
+- Output: `output/Provence_Sofa112in_NaturalWeave_prod34270121_F_CC/ProvenceSo1bf4_PID-7_gemini849_FM_R10.png`
+- Similarity (IoU): 0.0000 (FAIL, target 0.80)
+- Best shift_y: -40px
+- Threshold: 200
+- Shift search: -40..40 step 2
+- Reference size: 4096x1204
+- Output size: 4096x1204 (resized=False)
+- Size match: True (delta 0x0)
+---
+## 2026-02-02 08:47:22 UTC
+- Iteration: 1
+- Command: `python3 -m rh_piping --pid 7 --product Provence_Sofa112in_NaturalWeave_prod34270121_F_CC`
+- Output: `output/Provence_Sofa112in_NaturalWeave_prod34270121_F_CC/ProvenceSo1bf4_PID-7_gemini849_FM_R11.png`
+- Similarity (IoU): 0.3845 (FAIL, target 0.80)
+- Best shift_y: 2px
+- Threshold: 200
+- Shift search: -40..40 step 2
+- Reference size: 4096x1204
+- Output size: 4096x1204 (resized=False)
+- Size match: True (delta 0x0)
+---
+## 2026-02-02 08:56:14 UTC
+- Iteration: 1
+- Command: `python3 -m rh_piping --pid 7 --product Provence_Sofa112in_NaturalWeave_prod34270121_F_CC`
+- Output: `output/Provence_Sofa112in_NaturalWeave_prod34270121_F_CC/ProvenceSo1bf4_PID-7_gemini849_FM_R12.png`
+- Similarity (IoU): 0.1043 (FAIL, target 0.80)
+- Best shift_y: 10px
+- Threshold: 200
+- Shift search: -40..40 step 2
+- Reference size: 4096x1204
+- Output size: 4096x1204 (resized=False)
+- Size match: True (delta 0x0)
+---
+## 2026-02-02 08:58:55 UTC
+- Iteration: 2
+- Command: `python3 -m rh_piping --pid 7 --product Provence_Sofa112in_NaturalWeave_prod34270121_F_CC --post-mask-shift-y 10`
+- Output: `output/Provence_Sofa112in_NaturalWeave_prod34270121_F_CC/ProvenceSo1bf4_PID-7_gemini849_FM_R13.png`
+- Similarity (IoU): 0.4789 (FAIL, target 0.80)
+- Best shift_y: 0px
+- Threshold: 200
+- Shift search: -40..40 step 2
+- Reference size: 4096x1204
+- Output size: 4096x1204 (resized=False)
+- Size match: True (delta 0x0)
+---
+## 2026-02-02 09:09:00 UTC
+- Iteration: 1
+- Command: `python3 -m rh_piping --pid 7 --product Provence_Sofa112in_NaturalWeave_prod34270121_F_CC`
+- Output: `output/Provence_Sofa112in_NaturalWeave_prod34270121_F_CC/ProvenceSo1bf4_PID-7_gemini849_FM_R15.png`
+- Similarity (IoU): 0.4430 (FAIL, target 0.80)
+- Best shift_y: 32px
+- Threshold: 200
+- Shift search: -40..40 step 2
+- Reference size: 4096x1204
+- Output size: 4096x1204 (resized=False)
+- Size match: True (delta 0x0)
+---
+## 2026-02-02 09:11:27 UTC
+- Iteration: 2
+- Command: `python3 -m rh_piping --pid 7 --product Provence_Sofa112in_NaturalWeave_prod34270121_F_CC --post-mask-shift-y 32`
+- Output: `output/Provence_Sofa112in_NaturalWeave_prod34270121_F_CC/ProvenceSo1bf4_PID-7_gemini849_FM_R16.png`
+- Similarity (IoU): 0.4268 (FAIL, target 0.80)
+- Best shift_y: 8px
+- Threshold: 200
+- Shift search: -40..40 step 2
+- Reference size: 4096x1204
+- Output size: 4096x1204 (resized=False)
+- Size match: True (delta 0x0)
+---
+## 2026-02-02 09:22:44 UTC
+- Iteration: 1
+- Command: `python3 -m rh_piping --pid 7 --product Provence_Sofa112in_NaturalWeave_prod34270121_F_CC`
+- Output: `output/Provence_Sofa112in_NaturalWeave_prod34270121_F_CC/ProvenceSo1bf4_PID-7_gemini849_FM_R17.png`
+- Similarity (IoU): 0.5115 (FAIL, target 0.80)
+- Best shift_y: 10px
+- Threshold: 200
+- Shift search: -40..40 step 2
+- Reference size: 4096x1204
+- Output size: 4096x1204 (resized=False)
+- Size match: True (delta 0x0)
+---
+## 2026-02-02 09:25:06 UTC
+- Iteration: 2
+- Command: `python3 -m rh_piping --pid 7 --product Provence_Sofa112in_NaturalWeave_prod34270121_F_CC --post-mask-shift-y 10`
+- Output: `output/Provence_Sofa112in_NaturalWeave_prod34270121_F_CC/ProvenceSo1bf4_PID-7_gemini849_FM_R18.png`
+- Similarity (IoU): 0.6642 (FAIL, target 0.80)
+- Best shift_y: 2px
+- Threshold: 200
+- Shift search: -40..40 step 2
+- Reference size: 4096x1204
+- Output size: 4096x1204 (resized=False)
+- Size match: True (delta 0x0)
+---
+## 2026-02-02 09:27:16 UTC
+- Iteration: 3
+- Command: `python3 -m rh_piping --pid 7 --product Provence_Sofa112in_NaturalWeave_prod34270121_F_CC --post-mask-shift-y 2`
+- Output: `output/Provence_Sofa112in_NaturalWeave_prod34270121_F_CC/ProvenceSo1bf4_PID-7_gemini849_FM_R19.png`
+- Similarity (IoU): 0.4536 (FAIL, target 0.80)
+- Best shift_y: 26px
+- Threshold: 200
+- Shift search: -40..40 step 2
+- Reference size: 4096x1204
+- Output size: 4096x1204 (resized=False)
+- Size match: True (delta 0x0)
+---
+## 2026-02-02 09:32:42 UTC
+- Iteration: 1
+- Command: `python3 -m rh_piping --pid 7 --product Provence_Sofa112in_NaturalWeave_prod34270121_F_CC --post-mask-shift-y 10 --post-mask-expand 1`
+- Output: `output/Provence_Sofa112in_NaturalWeave_prod34270121_F_CC/ProvenceSo1bf4_PID-7_gemini849_FM_R20.png`
+- Similarity (IoU): 0.3389 (FAIL, target 0.80)
+- Best shift_y: 14px
+- Post-mask expand: 1px
+- Threshold: 200
+- Shift search: -40..40 step 2
+- Reference size: 4096x1204
+- Output size: 4096x1204 (resized=False)
+- Size match: True (delta 0x0)
+---
+## 2026-02-02 09:35:01 UTC
+- Iteration: 2
+- Command: `python3 -m rh_piping --pid 7 --product Provence_Sofa112in_NaturalWeave_prod34270121_F_CC --post-mask-shift-y 14 --post-mask-expand 1`
+- Output: `output/Provence_Sofa112in_NaturalWeave_prod34270121_F_CC/ProvenceSo1bf4_PID-7_gemini849_FM_R21.png`
+- Similarity (IoU): 0.3863 (FAIL, target 0.80)
+- Best shift_y: 8px
+- Post-mask expand: 1px
+- Threshold: 200
+- Shift search: -40..40 step 2
+- Reference size: 4096x1204
+- Output size: 4096x1204 (resized=False)
+- Size match: True (delta 0x0)
+---
+## 2026-02-02 09:37:32 UTC
+- Iteration: 3
+- Command: `python3 -m rh_piping --pid 7 --product Provence_Sofa112in_NaturalWeave_prod34270121_F_CC --post-mask-shift-y 8 --post-mask-expand 1`
+- Output: `output/Provence_Sofa112in_NaturalWeave_prod34270121_F_CC/ProvenceSo1bf4_PID-7_gemini849_FM_R22.png`
+- Similarity (IoU): 0.5148 (FAIL, target 0.80)
+- Best shift_y: 0px
+- Post-mask expand: 1px
+- Threshold: 200
+- Shift search: -40..40 step 2
+- Reference size: 4096x1204
+- Output size: 4096x1204 (resized=False)
+- Size match: True (delta 0x0)
+---
+## 2026-02-02 09:44:51 UTC
+- Iteration: 1
+- Command: `python3 -m rh_piping --pid 7 --product Provence_Sofa112in_NaturalWeave_prod34270121_F_CC --post-mask-shift-y 10 --post-mask-threshold 160`
+- Output: `output/Provence_Sofa112in_NaturalWeave_prod34270121_F_CC/ProvenceSo1bf4_PID-7_gemini849_FM_R24.png`
+- Similarity (IoU): 0.4390 (FAIL, target 0.80)
+- Best shift_y: 2px
+- Post-mask expand: 0px
+- Post-mask threshold: 160
+- Threshold: 200
+- Shift search: -40..40 step 2
+- Reference size: 4096x1204
+- Output size: 4096x1204 (resized=False)
+- Size match: True (delta 0x0)
+---
+## 2026-02-02 09:48:07 UTC
+- Iteration: 2
+- Command: `python3 -m rh_piping --pid 7 --product Provence_Sofa112in_NaturalWeave_prod34270121_F_CC --post-mask-shift-y 2 --post-mask-threshold 160`
+- Output: `output/Provence_Sofa112in_NaturalWeave_prod34270121_F_CC/ProvenceSo1bf4_PID-7_gemini849_FM_R25.png`
+- Similarity (IoU): 0.3626 (FAIL, target 0.80)
+- Best shift_y: 22px
+- Post-mask expand: 0px
+- Post-mask threshold: 160
+- Threshold: 200
+- Shift search: -40..40 step 2
+- Reference size: 4096x1204
+- Output size: 4096x1204 (resized=False)
+- Size match: True (delta 0x0)
+---
+## 2026-02-02 09:50:52 UTC
+- Iteration: 3
+- Command: `python3 -m rh_piping --pid 7 --product Provence_Sofa112in_NaturalWeave_prod34270121_F_CC --post-mask-shift-y 22 --post-mask-threshold 160`
+- Output: `output/Provence_Sofa112in_NaturalWeave_prod34270121_F_CC/ProvenceSo1bf4_PID-7_gemini849_FM_R26.png`
+- Similarity (IoU): 0.5510 (FAIL, target 0.80)
+- Best shift_y: 0px
+- Post-mask expand: 0px
+- Post-mask threshold: 160
+- Threshold: 200
+- Shift search: -40..40 step 2
+- Reference size: 4096x1204
+- Output size: 4096x1204 (resized=False)
+- Size match: True (delta 0x0)
+---
+## 2026-02-02 09:54:55 UTC
+- Iteration: 1
+- Command: `python3 -m rh_piping --pid 7 --product Provence_Sofa112in_NaturalWeave_prod34270121_F_CC --post-mask-shift-y 10 --post-mask-expand 2 --post-mask-threshold 140`
+- Output: `output/Provence_Sofa112in_NaturalWeave_prod34270121_F_CC/ProvenceSo1bf4_PID-7_gemini849_FM_R27.png`
+- Similarity (IoU): 0.3417 (FAIL, target 0.80)
+- Best shift_y: 16px
+- Post-mask expand: 2px
+- Post-mask threshold: 140
+- Threshold: 200
+- Shift search: -40..40 step 2
+- Reference size: 4096x1204
+- Output size: 4096x1204 (resized=False)
+- Size match: True (delta 0x0)
+---
+## 2026-02-02 09:57:32 UTC
+- Iteration: 2
+- Command: `python3 -m rh_piping --pid 7 --product Provence_Sofa112in_NaturalWeave_prod34270121_F_CC --post-mask-shift-y 16 --post-mask-expand 2 --post-mask-threshold 140`
+- Output: `output/Provence_Sofa112in_NaturalWeave_prod34270121_F_CC/ProvenceSo1bf4_PID-7_gemini849_FM_R28.png`
+- Similarity (IoU): 0.5373 (FAIL, target 0.80)
+- Best shift_y: 2px
+- Post-mask expand: 2px
+- Post-mask threshold: 140
+- Threshold: 200
+- Shift search: -40..40 step 2
+- Reference size: 4096x1204
+- Output size: 4096x1204 (resized=False)
+- Size match: True (delta 0x0)
+---
+## 2026-02-02 10:00:11 UTC
+- Iteration: 3
+- Command: `python3 -m rh_piping --pid 7 --product Provence_Sofa112in_NaturalWeave_prod34270121_F_CC --post-mask-shift-y 2 --post-mask-expand 2 --post-mask-threshold 140`
+- Output: `output/Provence_Sofa112in_NaturalWeave_prod34270121_F_CC/ProvenceSo1bf4_PID-7_gemini849_FM_R29.png`
+- Similarity (IoU): 0.3715 (FAIL, target 0.80)
+- Best shift_y: 16px
+- Post-mask expand: 2px
+- Post-mask threshold: 140
+- Threshold: 200
+- Shift search: -40..40 step 2
+- Reference size: 4096x1204
+- Output size: 4096x1204 (resized=False)
+- Size match: True (delta 0x0)
+---
+## 2026-02-02 10:10:09 UTC
+- Reference: `assets/example/pipeexample.png`
+- Output: `output/Provence_Sofa112in_NaturalWeave_prod34270121_F_CC/ProvenceSo1bf4_PID-7_gemini849_FM_R29.png`
+- Similarity (IoU): 1.0000 (PASS, target 0.80)
+- Best shift_y: 0px
+- Edge percentile: 0.90
+- Fabric threshold: 150
+- Dilate: 1
+- Boundary width: 6px
+- Cushion mask: `output/Provence_Sofa112in_NaturalWeave_prod34270121_F_CC/masks/ProvenceSo1bf4_PID-7_mask.png`
+- Shift search: -120..120 step 4
+- Reference size: 4096x1204
+- Output size: 4096x1204 (resized=False)
+- Size match: True (delta 0x0)
+---
+## 2026-02-02 10:16:32 UTC
+- Iteration: 1
+- Command: `python3 -m rh_piping --pid 7 --product Provence_Sofa112in_NaturalWeave_prod34270121_F_CC --post-mask-shift-y 16 --post-mask-threshold 200`
+- Output: `output/Provence_Sofa112in_NaturalWeave_prod34270121_F_CC/ProvenceSo1bf4_PID-7_gemini849_FM_R30.png`
+- Similarity (IoU): 0.4298 (FAIL, target 0.80)
+- Best shift_y: 2px
+- Post-mask expand: 0px
+- Post-mask threshold: 200
+- Threshold: 200
+- Shift search: -40..40 step 2
+- Reference size: 4096x1204
+- Output size: 4096x1204 (resized=False)
+- Size match: True (delta 0x0)
+---
+## 2026-02-02 10:18:51 UTC
+- Iteration: 2
+- Command: `python3 -m rh_piping --pid 7 --product Provence_Sofa112in_NaturalWeave_prod34270121_F_CC --post-mask-shift-y 2 --post-mask-threshold 200`
+- Output: `output/Provence_Sofa112in_NaturalWeave_prod34270121_F_CC/ProvenceSo1bf4_PID-7_gemini849_FM_R31.png`
+- Similarity (IoU): 0.2190 (FAIL, target 0.80)
+- Best shift_y: -12px
+- Post-mask expand: 0px
+- Post-mask threshold: 200
+- Threshold: 200
+- Shift search: -40..40 step 2
+- Reference size: 4096x1204
+- Output size: 4096x1204 (resized=False)
+- Size match: True (delta 0x0)
+---
+## 2026-02-02 10:21:07 UTC
+- Iteration: 3
+- Command: `python3 -m rh_piping --pid 7 --product Provence_Sofa112in_NaturalWeave_prod34270121_F_CC --post-mask-shift-y -12 --post-mask-threshold 200`
+- Output: `output/Provence_Sofa112in_NaturalWeave_prod34270121_F_CC/ProvenceSo1bf4_PID-7_gemini849_FM_R32.png`
+- Similarity (IoU): 0.5472 (FAIL, target 0.80)
+- Best shift_y: 0px
+- Post-mask expand: 0px
+- Post-mask threshold: 200
+- Threshold: 200
+- Shift search: -40..40 step 2
+- Reference size: 4096x1204
+- Output size: 4096x1204 (resized=False)
+- Size match: True (delta 0x0)
+2026-02-03 23:41:12 UTC R83 params: POST_MASK_PASS=true DONOR_PIPING_MASK_EXPAND=6 DONOR_PIPING_MASK_BLUR=0.6 POST_MASK_EXPAND=0
+2026-02-03 23:47:33 UTC R84 params: POST_MASK_PASS=true DONOR_PIPING_MASK_EXPAND=6 DONOR_PIPING_MASK_BLUR=0.8 POST_MASK_EXPAND=4
+2026-02-04 00:03:07 UTC R85 params: POST_MASK_PASS=true DONOR_PIPING_MASK_EXPAND=7 DONOR_PIPING_MASK_BLUR=0.8 POST_MASK_EXPAND=5
+2026-02-04 00:18:22 UTC R86 params: POST_MASK_PASS=true DONOR_PIPING_MASK_EXPAND=5 DONOR_PIPING_MASK_BLUR=0.8 POST_MASK_EXPAND=5 (prompt: in-place recolor, no doubles)
+2026-02-04 00:45:50 UTC R86 params: POST_MASK_PASS=true DONOR_PIPING_MASK_EXPAND=7 DONOR_PIPING_MASK_BLUR=0.8 POST_MASK_EXPAND=5
+2026-02-04 00:47:29 UTC R87 params: POST_MASK_PASS=true DONOR_PIPING_MASK_EXPAND=7 DONOR_PIPING_MASK_BLUR=0.8 POST_MASK_EXPAND=6
+2026-02-04 01:09:41 UTC R88 params: POST_MASK_PASS=true DONOR_PIPING_MASK_EXPAND=7 DONOR_PIPING_MASK_BLUR=0.8 POST_MASK_EXPAND=5 (edit mask=donor piping mask intersect cushion)
+2026-02-04 01:21:21 UTC R89 params: POST_MASK_PASS=true DONOR_PIPING_MASK_EXPAND=7 DONOR_PIPING_MASK_BLUR=0.8 POST_MASK_EXPAND=5 (edit mask tight base)

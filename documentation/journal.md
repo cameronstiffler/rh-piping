@@ -38,6 +38,16 @@ This log captures notable work, decisions, and approach changes. Append new entr
 
 ---
 
+## 2026-02-04 (Wed)
+
+### Summary
+- Added a session handoff snapshot so new sessions can resume without re-briefing.
+
+### What we did
+- Recorded canonical workflow, current PID/product, best recent outputs, and tuning knobs in `documentation/session_handoff.md`.
+
+---
+
 ## 2026-01-31 (Sat)
 
 ### Summary

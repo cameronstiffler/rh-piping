@@ -34,6 +34,10 @@ If `PIPE_PATH_PNG` is set (see `.env.example`), each run writes:
 
 This does not change masking/editing; it only helps quantify “non-piping pixels unchanged” vs “piping path changed”.
 
+### 12-iteration sweep helper
+
+`python3 scripts/pipe_path_sweep.py --pid 7 --product "Provence_Sofa112in_NaturalWeave_prod34270121_F_CC" --iters 12 --skip-api-calls`
+
 ## Run using Prompt found in prompts/ with PID #
 
 `python -m rh_piping --pid 1`

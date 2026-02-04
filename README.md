@@ -10,6 +10,7 @@ Python tooling for piping-focused furniture edits via AI image APIs.
 - `assets/processed/`: generated 4K PNGs derived from original TIFFs
 - `prompts/`: prompt templates
 - `output/`: generated results in a subfolder named same as product name
+- `documentation/codex_runbook.md`: consolidated iteration rules + QA intent
 
 ## Setup
 

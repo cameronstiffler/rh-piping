@@ -71,6 +71,8 @@ PIPING_REF_DIRNAME = "piping_ref_images"
 PROCESSED_DONOR_DIRNAME = "donor_image"
 PROCESSED_COLOR_DIRNAME = "color_reference"
 PROCESSED_PIPING_REF_DIRNAME = "piping_ref_images"
+PROCESSED_EXPLICIT_PLACEMENT_DIRNAME = "explicit_placement_map"
+PROCESSED_EXPLICIT_PLACEMENT_DIRNAME_LEGACY = "explicite_placement_map"
 
 MAX_RESULTS = 100
 RAW_OUTPUT_MAX_ATTEMPTS = 3
@@ -577,14 +579,45 @@ def build_jobs(assets_dir: Path, processed_dir: Path, product: str | None) -> li
         donors = [donor for donor in donors if _match_product(donor, product)]
 
     processed_donor_dir = processed_dir / PROCESSED_DONOR_DIRNAME
+    if donors:
+        return [
+            PipingJob(
+                product_name=donor.stem,
+                donor_original=donor,
+                donor_processed=processed_donor_dir / f"{donor.stem}.png",
+            )
+            for donor in donors
+        ]
+
+    # Fallback: allow processed donors when originals are missing (processed PNGs only).
+    processed_donors = list_images(processed_donor_dir)
+    if product:
+        processed_donors = [
+            donor for donor in processed_donors if _match_product(donor, product)
+        ]
     return [
         PipingJob(
             product_name=donor.stem,
             donor_original=donor,
-            donor_processed=processed_donor_dir / f"{donor.stem}.png",
+            donor_processed=donor,
         )
-        for donor in donors
+        for donor in processed_donors
     ]
+
+
+def _find_explicit_placement_map(processed_dir: Path, product_name: str) -> Path | None:
+    placement_dirs = [
+        processed_dir / PROCESSED_EXPLICIT_PLACEMENT_DIRNAME,
+        processed_dir / PROCESSED_EXPLICIT_PLACEMENT_DIRNAME_LEGACY,
+    ]
+    candidates: list[Path] = []
+    for placement_dir in placement_dirs:
+        if placement_dir.exists():
+            candidates.extend(list_images(placement_dir))
+    for candidate in candidates:
+        if _match_product(candidate, product_name):
+            return candidate
+    return None
 
 
 def run_pipeline(
@@ -855,6 +888,15 @@ def run_pipeline(
             piping_ref_bytes.append(processed_path.read_bytes())
 
     for job in jobs:
+        job_piping_refs = list(piping_ref_bytes)
+        explicit_map_path = _find_explicit_placement_map(
+            config.processed_dir, job.product_name
+        )
+        if explicit_map_path is not None:
+            job_piping_refs.append(explicit_map_path.read_bytes())
+            print(
+                f"[explicit-map] using {explicit_map_path.relative_to(config.processed_dir)}"
+            )
         donor_meta = convert_to_4k_png(job.donor_original, job.donor_processed)
         print(
             f"[convert] donor {job.donor_original.name} -> {job.donor_processed.name} "
@@ -1045,7 +1087,7 @@ def run_pipeline(
                 use_vertex=config.use_vertex,
                 prompt=mask_prompt,
                 donor_png=donor_mask_bytes,
-                piping_ref_pngs=piping_ref_bytes,
+                piping_ref_pngs=job_piping_refs,
                 response_mime_type=response_mime or "application/json",
                 max_output_tokens=segmentation_max_output_tokens
                 or config.segmentation_max_output_tokens,
@@ -1175,7 +1217,7 @@ def run_pipeline(
                             use_vertex=config.use_vertex,
                             prompt=mask_prompt,
                             donor_png=donor_mask_bytes,
-                            piping_ref_pngs=piping_ref_bytes,
+                            piping_ref_pngs=job_piping_refs,
                             image_size=None,
                             aspect_ratio=None,
                         )
@@ -1196,7 +1238,10 @@ def run_pipeline(
                             raw_ratio = raw_w / raw_h if raw_h else 0.0
                             tgt_ratio = tgt_w / tgt_h if tgt_h else 0.0
                             ratio_delta = abs(raw_ratio - tgt_ratio)
-                            if ratio_delta <= 0.01 and attempt == MODEL_MASK_MAX_ATTEMPTS:
+                            if (
+                                ratio_delta <= config.model_mask_ratio_tol
+                                and attempt == MODEL_MASK_MAX_ATTEMPTS
+                            ):
                                 print(
                                     " [mask] size mismatch; resizing to donor "
                                     f"({raw_w}x{raw_h} -> {tgt_w}x{tgt_h})"
@@ -1228,7 +1273,7 @@ def run_pipeline(
                         use_vertex=config.use_vertex,
                         prompt=mask_prompt,
                         donor_png=donor_mask_bytes,
-                        piping_ref_pngs=piping_ref_bytes,
+                        piping_ref_pngs=job_piping_refs,
                         image_size=config.image_size,
                         aspect_ratio=api_aspect_ratio,
                     )
@@ -1316,7 +1361,7 @@ def run_pipeline(
             use_vertex=config.use_vertex,
             prompt=mask_prompt,
             donor_png=donor_mask_bytes,
-            piping_ref_pngs=piping_ref_bytes,
+            piping_ref_pngs=job_piping_refs,
             image_size=None,
             aspect_ratio=None,
         )
@@ -1510,7 +1555,7 @@ def run_pipeline(
                             use_vertex=config.use_vertex,
                             prompt=mask_prompt,
                             donor_png=aligned_png,
-                            piping_ref_pngs=piping_ref_bytes,
+                            piping_ref_pngs=job_piping_refs,
                             image_size=None,
                             aspect_ratio=None,
                         )
@@ -1634,7 +1679,7 @@ def run_pipeline(
                         prompt=prompt_text,
                         donor_png=donor_api_bytes,
                         color_ref_png=color_bytes,
-                        piping_ref_pngs=piping_ref_bytes,
+                        piping_ref_pngs=job_piping_refs,
                         mask_png=mask_api_bytes,
                         temperature=config.temperature,
                         image_size=edit_image_size,

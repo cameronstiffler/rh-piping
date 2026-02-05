@@ -27,4 +27,4 @@ This document describes the QA checks performed **after** a final image is rende
 - No new seams, no outlines, no double lines.
 - No visible changes outside the piping.
 
-** Prepare for next pass but making changes to code and prompts to achieve general goals **
+Prepare for next pass by making targeted code/prompt changes to meet the goals above.

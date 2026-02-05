@@ -782,3 +782,57 @@ YYYY-MM-DD
 - Summary: Auto-copy the final output image to a shared folder after each run.
 - What we did:
   - Added `LATEST_RESULT_DIR` (optional). When set, the pipeline copies the final PNG to `latest.png` in that folder, overwriting any existing file.
+
+---
+
+## 2026-02-04 (Wed) — Manual pipeline run (PID-7 R133)
+
+### Summary
+- Ran a manual pipeline call for PID-7 using the canonical flow.
+
+### What we did
+- Executed `python3 -m rh_piping --pid 7 --product "Provence_Sofa112in_NaturalWeave_prod34270121_F_CC"`.
+- Used existing model cushion mask and generated donor piping mask (intersected, expanded 2px).
+- Saved output `ProvenceSo1bf4_PID-7_gemini849_FM_R133.png`; ensured DPI set to 300.
+
+---
+
+## 2026-02-04 (Wed) — QA helper + prompt tightening
+
+### Summary
+- Added a QA helper to score any result against the donor along the pipe-path overlay.
+- Tightened the PID-7 prompt to avoid texture smoothing, halos, and color spill.
+
+### What we did
+- Added `scripts/pipe_path_score.py` for manual pipe-path scoring (JSON + mask output).
+- Updated `prompts/initial_prompt_PID-7.md` with stricter realism constraints.
+
+---
+
+## 2026-02-04 (Wed) — Processed donor fallback
+
+### Summary
+- Allowed the pipeline to use processed donors directly when originals are missing.
+
+### What we did
+- `build_jobs` now falls back to `assets/processed/donor_image/` if no originals are found.
+
+---
+
+## 2026-02-04 (Wed) — Model mask ratio tolerance
+
+### Summary
+- Added configurable tolerance for model mask size ratio mismatches.
+
+### What we did
+- Introduced `MODEL_MASK_RATIO_TOL` (default 0.01) so near‑match aspect ratios can be resized on the last retry.
+
+---
+
+## 2026-02-04 (Wed) — Explicit placement map refs
+
+### Summary
+- When available, include explicit placement maps as extra references for pipe drawing.
+
+### What we did
+- Pipeline now looks in `assets/processed/explicite_placement_map/` for a product‑named PNG and appends it to the piping reference list.

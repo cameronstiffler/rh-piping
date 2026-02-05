@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Iterate pipeline runs and compare piping mask similarity to a reference image."""
+"""Iterate pipeline runs and compare donor-piping mask similarity to a reference image.
+
+QA-only: this script generates masks for comparison and does not alter the
+production edit/composite flow.
+"""
 
 from __future__ import annotations
 
@@ -15,7 +19,7 @@ from PIL import Image, ImageOps, ImageChops
 from rh_piping.config import load_config
 from rh_piping.genai_client import create_client, generate_piping_mask
 from rh_piping.images import normalize_mask_bytes, normalize_mask_bytes_exact
-from rh_piping.pipeline import _format_mask_prompt, _load_post_mask_prompt
+from rh_piping.pipeline import _format_mask_prompt, _load_donor_piping_mask_prompt
 
 
 @dataclass
@@ -38,17 +42,17 @@ class IterationResult:
 
 
 def _load_prompt(prompts_dir: Path, pid: int) -> str:
-    prompt = _load_post_mask_prompt(prompts_dir, f"PID-{pid}")
+    prompt = _load_donor_piping_mask_prompt(prompts_dir, f"PID-{pid}")
     if not prompt:
         raise FileNotFoundError(
             f"No piping mask prompt found for PID-{pid}. Expected "
-            f"mask_prompt_MID-{pid}_piping.md (or _post fallback)."
+            f"mask_prompt_MID-{pid}_donor_piping.md."
         )
     return prompt
 
 
 def _list_piping_refs(assets_dir: Path, max_refs: int | None) -> list[bytes]:
-    ref_dir = assets_dir / "processed" / "piping_ref_highlighted"
+    ref_dir = assets_dir / "processed" / "piping_ref_images"
     if not ref_dir.exists():
         return []
     refs = sorted([p for p in ref_dir.iterdir() if p.is_file()])

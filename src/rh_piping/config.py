@@ -52,6 +52,7 @@ class AppConfig:
     model_mask_pass: bool
     model_mask_prompt: str | None
     model_mask_threshold: int
+    model_mask_ratio_tol: float
     segmentation_mask_model: str | None
     segmentation_mask_threshold: int
     segmentation_response_mime_type: str | None
@@ -163,6 +164,7 @@ def load_config() -> AppConfig:
     model_mask_pass = _env_flag("MODEL_MASK_PASS", default=True)
     model_mask_prompt = _env_str("MODEL_MASK_PROMPT")
     model_mask_threshold = _env_int("MODEL_MASK_THRESHOLD") or 200
+    model_mask_ratio_tol = _env_float("MODEL_MASK_RATIO_TOL", 0.01)
     segmentation_mask_model = _env_str("SEGMENTATION_MASK_MODEL") or "gemini-2.5-flash"
     segmentation_mask_threshold = _env_int("SEGMENTATION_MASK_THRESHOLD") or 1
     segmentation_response_mime_type = _env_str("SEGMENTATION_RESPONSE_MIME_TYPE")
@@ -249,6 +251,7 @@ def load_config() -> AppConfig:
         model_mask_pass=model_mask_pass,
         model_mask_prompt=model_mask_prompt,
         model_mask_threshold=model_mask_threshold,
+        model_mask_ratio_tol=model_mask_ratio_tol,
         segmentation_mask_model=segmentation_mask_model,
         segmentation_mask_threshold=segmentation_mask_threshold,
         segmentation_response_mime_type=segmentation_response_mime_type,

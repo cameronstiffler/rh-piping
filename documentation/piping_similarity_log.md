@@ -401,3 +401,18 @@
 2026-02-04 02:29:00 UTC R92 params: POST_MASK_PASS=true DONOR_PIPING_MASK_EXPAND=7 DONOR_PIPING_MASK_BLUR=0.8 POST_MASK_EXPAND=6
 2026-02-04 02:44:23 UTC R93 params: POST_MASK_PASS=true DONOR_PIPING_MASK_EXPAND=7 DONOR_PIPING_MASK_BLUR=0.7 POST_MASK_EXPAND=7
 2026-02-04 02:57:53 UTC R94 params: POST_MASK_PASS=true DONOR_PIPING_MASK_EXPAND=7 DONOR_PIPING_MASK_BLUR=0.8 POST_MASK_EXPAND=7 (donor piping prompt: inner edge)
+---
+## 2026-02-04 12:12:25 UTC
+- Reference: `assets/processed/donor_image/Provence_Sofa112in_NaturalWeave_prod34270121_F_CC.png`
+- Output: `output/Provence_Sofa112in_NaturalWeave_prod34270121_F_CC/ProvenceSo1bf4_PID-7_gemini849_FM_R133.png`
+- Similarity (IoU): 0.9462 (PASS, target 0.80)
+- Best shift_y: 0px
+- Edge percentile: 0.90
+- Fabric threshold: 150
+- Dilate: 1
+- Boundary width: 6px
+- Cushion mask: `None`
+- Shift search: -120..120 step 4
+- Reference size: 4096x1204
+- Output size: 4096x1204 (resized=False)
+- Size match: True (delta 0x0)

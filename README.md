@@ -6,7 +6,7 @@ Python tooling for piping-focused furniture edits via AI image APIs.
 
 - `assets/original/donor_image/`: primary product images to edit
 - `assets/original/color_reference/`: fabric/finish reference images
-- `assets/original/piping_ref_highlighted/`: piping reference images with highlighted piping
+- `assets/original/piping_ref_images/`: piping reference images
 - `assets/processed/`: generated 4K PNGs derived from original TIFFs
 - `prompts/`: prompt templates
 - `output/`: generated results in a subfolder named same as product name
@@ -51,9 +51,9 @@ This does not change masking/editing; it only helps quantify “non-piping pixel
 
 `python -m rh_piping --product "Provence_Sofa112in_NaturalWeave_prod34270121_F_CC"`
 
-## Run and specify number of results to output 
+## Results count
 
-`python -m rh_piping --results 5`
+Exactly 1 result per run (don’t add `--results` unless explicitly requested).
 
 ## Output product image name format
 [product name from donor image]_PID-[prompt pid used in geenration]_MOD-[ai model used in generation]_R-[result number]

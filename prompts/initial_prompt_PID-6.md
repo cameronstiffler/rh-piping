@@ -14,4 +14,3 @@ Techinical Requirements:
 Color Space: Use Adobe RGB (1998).
 Resolution: 300 DPI.
 Image Dimensions: Overall output image may be taller than the Donor Image while preserving the sofa’s original pixel size.
-Transparency: None. Output must be fully opaque with a solid white background (#FFFFFF).

@@ -111,3 +111,147 @@ Append new runs at the bottom.
 - Notes:
   - Canonical workflow is now: **model cushion mask for edit** + **donor piping mask (intersect cushion) for composite**.
   - Post-mask generation from edited output is disabled and not used.
+
+### 2026-02-04 (Wed) — PID-7 R133
+- Command: `python3 -m rh_piping --pid 7 --product "Provence_Sofa112in_NaturalWeave_prod34270121_F_CC"`
+- Product: `Provence_Sofa112in_NaturalWeave_prod34270121_F_CC`
+- Donor (processed): `assets/processed/donor_image/Provence_Sofa112in_NaturalWeave_prod34270121_F_CC.png`
+- Prompt: `prompts/initial_prompt_PID-7.md`
+- Mask (model mask): `output/Provence_Sofa112in_NaturalWeave_prod34270121_F_CC/masks/ProvenceSo1bf4_PID-7_mask.png`
+- Output: `output/Provence_Sofa112in_NaturalWeave_prod34270121_F_CC/ProvenceSo1bf4_PID-7_gemini849_FM_R133.png`
+- Notes: Used existing model cushion mask; generated donor piping mask (intersected, expanded 2px). Mask coverage 0.0285. DPI set to 300.
+
+### 2026-02-04 (Wed) — PID-7 R134
+- Command: `python3 -m rh_piping --pid 7 --product "Provence_Sofa112in_NaturalWeave_prod34270121_F_CC"`
+- Product: `Provence_Sofa112in_NaturalWeave_prod34270121_F_CC`
+- Donor (processed): `assets/processed/donor_image/Provence_Sofa112in_NaturalWeave_prod34270121_F_CC.png`
+- Prompt: `prompts/initial_prompt_PID-7.md`
+- Mask (model mask): `output/Provence_Sofa112in_NaturalWeave_prod34270121_F_CC/masks/ProvenceSo1bf4_PID-7_mask.png`
+- Output: `output/Provence_Sofa112in_NaturalWeave_prod34270121_F_CC/ProvenceSo1bf4_PID-7_gemini849_FM_R134.png`
+- Notes: Used existing model cushion mask; generated donor piping mask (intersected, expanded 2px). Mask coverage 0.0293. DPI set to 300.
+
+### 2026-02-04 (Wed) — PID-7 R135
+- Command: `DONOR_PIPING_MASK_EXPAND=2 DONOR_PIPING_MASK_BLUR=0.0 COMPOSITE_MASK_ERODE=1 COMPOSITE_MASK_FEATHER=0.4 python3 -m rh_piping --pid 7 --product "Provence_Sofa112in_NaturalWeave_prod34270121_F_CC"`
+- Product: `Provence_Sofa112in_NaturalWeave_prod34270121_F_CC`
+- Donor (processed): `assets/processed/donor_image/Provence_Sofa112in_NaturalWeave_prod34270121_F_CC.png`
+- Prompt: `prompts/initial_prompt_PID-7.md`
+- Mask (model mask): `output/Provence_Sofa112in_NaturalWeave_prod34270121_F_CC/masks/ProvenceSo1bf4_PID-7_mask.png`
+- Output: `output/Provence_Sofa112in_NaturalWeave_prod34270121_F_CC/ProvenceSo1bf4_PID-7_gemini849_FM_R135.png`
+- Notes: Donor piping mask expanded 2px, blur 0.0; composite erode 1, feather 0.4. Mask coverage 0.0271. DPI set to 300.
+
+### 2026-02-04 (Wed) — PID-7 R136
+- Command: `DONOR_PIPING_MASK_EXPAND=3 DONOR_PIPING_MASK_BLUR=0.3 COMPOSITE_MASK_ERODE=1 COMPOSITE_MASK_FEATHER=0.5 python3 -m rh_piping --pid 7 --product "Provence_Sofa112in_NaturalWeave_prod34270121_F_CC"`
+- Product: `Provence_Sofa112in_NaturalWeave_prod34270121_F_CC`
+- Donor (processed): `assets/processed/donor_image/Provence_Sofa112in_NaturalWeave_prod34270121_F_CC.png`
+- Prompt: `prompts/initial_prompt_PID-7.md`
+- Mask (model mask): `output/Provence_Sofa112in_NaturalWeave_prod34270121_F_CC/masks/ProvenceSo1bf4_PID-7_mask.png`
+- Output: `output/Provence_Sofa112in_NaturalWeave_prod34270121_F_CC/ProvenceSo1bf4_PID-7_gemini849_FM_R136.png`
+- Notes: Donor piping mask expanded 3px, blur 0.3; composite erode 1, feather 0.5. Mask coverage 0.0428. DPI set to 300.
+
+### 2026-02-04 (Wed) — PID-7 R137
+- Command: `DONOR_PIPING_MASK_EXPAND=4 DONOR_PIPING_MASK_BLUR=0.4 COMPOSITE_MASK_ERODE=1 COMPOSITE_MASK_FEATHER=0.6 python3 -m rh_piping --pid 7 --product "Provence_Sofa112in_NaturalWeave_prod34270121_F_CC"`
+- Product: `Provence_Sofa112in_NaturalWeave_prod34270121_F_CC`
+- Donor (processed): `assets/processed/donor_image/Provence_Sofa112in_NaturalWeave_prod34270121_F_CC.png`
+- Prompt: `prompts/initial_prompt_PID-7.md`
+- Mask (model mask): `output/Provence_Sofa112in_NaturalWeave_prod34270121_F_CC/masks/ProvenceSo1bf4_PID-7_mask.png`
+- Output: `output/Provence_Sofa112in_NaturalWeave_prod34270121_F_CC/ProvenceSo1bf4_PID-7_gemini849_FM_R137.png`
+- Notes: Donor piping mask expanded 4px, blur 0.4; composite erode 1, feather 0.6. Mask coverage 0.0533. DPI set to 300.
+
+### 2026-02-04 (Wed) — PID-7 R138
+- Command: `DONOR_PIPING_MASK_EXPAND=3 DONOR_PIPING_MASK_BLUR=0.2 COMPOSITE_MASK_ERODE=2 COMPOSITE_MASK_FEATHER=0.5 python3 -m rh_piping --pid 7 --product "Provence_Sofa112in_NaturalWeave_prod34270121_F_CC"`
+- Product: `Provence_Sofa112in_NaturalWeave_prod34270121_F_CC`
+- Donor (processed): `assets/processed/donor_image/Provence_Sofa112in_NaturalWeave_prod34270121_F_CC.png`
+- Prompt: `prompts/initial_prompt_PID-7.md`
+- Mask (model mask): `output/Provence_Sofa112in_NaturalWeave_prod34270121_F_CC/masks/ProvenceSo1bf4_PID-7_mask.png`
+- Output: `output/Provence_Sofa112in_NaturalWeave_prod34270121_F_CC/ProvenceSo1bf4_PID-7_gemini849_FM_R138.png`
+- Notes: Donor piping mask expanded 3px, blur 0.2; composite erode 2, feather 0.5. Mask coverage 0.0443. DPI set to 300.
+
+### 2026-02-04 (Wed) — PID-7 R139
+- Command: `DONOR_PIPING_MASK_EXPAND=2 DONOR_PIPING_MASK_BLUR=0.1 COMPOSITE_MASK_ERODE=2 COMPOSITE_MASK_FEATHER=0.4 python3 -m rh_piping --pid 7 --product "Provence_Sofa112in_NaturalWeave_prod34270121_F_CC"`
+- Product: `Provence_Sofa112in_NaturalWeave_prod34270121_F_CC`
+- Donor (processed): `assets/processed/donor_image/Provence_Sofa112in_NaturalWeave_prod34270121_F_CC.png`
+- Prompt: `prompts/initial_prompt_PID-7.md`
+- Mask (model mask): `output/Provence_Sofa112in_NaturalWeave_prod34270121_F_CC/masks/ProvenceSo1bf4_PID-7_mask.png`
+- Output: `output/Provence_Sofa112in_NaturalWeave_prod34270121_F_CC/ProvenceSo1bf4_PID-7_gemini849_FM_R139.png`
+- Notes: Donor piping mask expanded 2px, blur 0.1; composite erode 2, feather 0.4. Mask coverage 0.0344. DPI set to 300.
+
+### 2026-02-04 (Wed) — PID-7 R141
+- Command: `DONOR_PIPING_MASK_EXPAND=2 DONOR_PIPING_MASK_BLUR=0.1 COMPOSITE_MASK_ERODE=1 COMPOSITE_MASK_FEATHER=0.4 python3 -m rh_piping --pid 7 --product "Provence_Sofa112in_NaturalWeave_prod34270121_F_CC"`
+- Product: `Provence_Sofa112in_NaturalWeave_prod34270121_F_CC`
+- Donor (processed): `assets/processed/donor_image/Provence_Sofa112in_NaturalWeave_prod34270121_F_CC.png`
+- Prompt: `prompts/initial_prompt_PID-7.md`
+- Mask (model mask): `output/Provence_Sofa112in_NaturalWeave_prod34270121_F_CC/masks/ProvenceSo1bf4_PID-7_mask.png`
+- Output: `output/Provence_Sofa112in_NaturalWeave_prod34270121_F_CC/ProvenceSo1bf4_PID-7_gemini849_FM_R141.png`
+- Notes: Donor piping mask expanded 2px, blur 0.1; composite erode 1, feather 0.4. Mask coverage 0.0385. DPI set to 300. Pipe-path score: changed_pipe_pct 0.4875, changed_non_pipe_pct 0.006493.
+
+### 2026-02-04 (Wed) — PID-7 R142
+- Command: `DONOR_PIPING_MASK_EXPAND=3 DONOR_PIPING_MASK_BLUR=0.2 COMPOSITE_MASK_ERODE=1 COMPOSITE_MASK_FEATHER=0.5 python3 -m rh_piping --pid 7 --product "Provence_Sofa112in_NaturalWeave_prod34270121_F_CC"`
+- Product: `Provence_Sofa112in_NaturalWeave_prod34270121_F_CC`
+- Donor (processed): `assets/processed/donor_image/Provence_Sofa112in_NaturalWeave_prod34270121_F_CC.png`
+- Prompt: `prompts/initial_prompt_PID-7.md`
+- Mask (model mask): `output/Provence_Sofa112in_NaturalWeave_prod34270121_F_CC/masks/ProvenceSo1bf4_PID-7_mask.png`
+- Output: `output/Provence_Sofa112in_NaturalWeave_prod34270121_F_CC/ProvenceSo1bf4_PID-7_gemini849_FM_R142.png`
+- Notes: Donor piping mask expanded 3px, blur 0.2; composite erode 1, feather 0.5. Mask coverage 0.0478. DPI set to 300. Pipe-path score: changed_pipe_pct 0.5847, changed_non_pipe_pct 0.007058.
+
+### 2026-02-04 (Wed) — PID-7 R143
+- Command: `DONOR_PIPING_MASK_EXPAND=2 DONOR_PIPING_MASK_BLUR=0.0 COMPOSITE_MASK_ERODE=2 COMPOSITE_MASK_FEATHER=0.3 python3 -m rh_piping --pid 7 --product "Provence_Sofa112in_NaturalWeave_prod34270121_F_CC"`
+- Product: `Provence_Sofa112in_NaturalWeave_prod34270121_F_CC`
+- Donor (processed): `assets/processed/donor_image/Provence_Sofa112in_NaturalWeave_prod34270121_F_CC.png`
+- Prompt: `prompts/initial_prompt_PID-7.md`
+- Mask (model mask): `output/Provence_Sofa112in_NaturalWeave_prod34270121_F_CC/masks/ProvenceSo1bf4_PID-7_mask.png`
+- Output: `output/Provence_Sofa112in_NaturalWeave_prod34270121_F_CC/ProvenceSo1bf4_PID-7_gemini849_FM_R143.png`
+- Notes: Donor piping mask expanded 2px, blur 0.0; composite erode 2, feather 0.3. Mask coverage 0.0341. DPI set to 300. Pipe-path score: changed_pipe_pct 0.4675, changed_non_pipe_pct 0.002279.
+
+### 2026-02-04 (Wed) — PID-7 R144
+- Command: `DONOR_PIPING_MASK_EXPAND=2 DONOR_PIPING_MASK_BLUR=0.1 COMPOSITE_MASK_ERODE=2 COMPOSITE_MASK_FEATHER=0.4 python3 -m rh_piping --pid 7 --product "Provence_Sofa112in_NaturalWeave_prod34270121_F_CC"`
+- Product: `Provence_Sofa112in_NaturalWeave_prod34270121_F_CC`
+- Donor (processed): `assets/processed/donor_image/Provence_Sofa112in_NaturalWeave_prod34270121_F_CC.png`
+- Prompt: `prompts/initial_prompt_PID-7.md`
+- Mask (model mask): `output/Provence_Sofa112in_NaturalWeave_prod34270121_F_CC/masks/ProvenceSo1bf4_PID-7_mask.png`
+- Output: `output/Provence_Sofa112in_NaturalWeave_prod34270121_F_CC/ProvenceSo1bf4_PID-7_gemini849_FM_R144.png`
+- Notes: Donor piping mask expanded 2px, blur 0.1; composite erode 2, feather 0.4. Mask coverage 0.0345. DPI set to 300. Pipe-path score: changed_pipe_pct 0.4681, changed_non_pipe_pct 0.005144.
+
+### 2026-02-04 (Wed) — PID-7 R145
+- Command: `DONOR_PIPING_MASK_EXPAND=3 DONOR_PIPING_MASK_BLUR=0.1 COMPOSITE_MASK_ERODE=2 COMPOSITE_MASK_FEATHER=0.4 python3 -m rh_piping --pid 7 --product "Provence_Sofa112in_NaturalWeave_prod34270121_F_CC"`
+- Product: `Provence_Sofa112in_NaturalWeave_prod34270121_F_CC`
+- Donor (processed): `assets/processed/donor_image/Provence_Sofa112in_NaturalWeave_prod34270121_F_CC.png`
+- Prompt: `prompts/initial_prompt_PID-7.md`
+- Mask (model mask): `output/Provence_Sofa112in_NaturalWeave_prod34270121_F_CC/masks/ProvenceSo1bf4_PID-7_mask.png`
+- Output: `output/Provence_Sofa112in_NaturalWeave_prod34270121_F_CC/ProvenceSo1bf4_PID-7_gemini849_FM_R145.png`
+- Notes: Donor piping mask expanded 3px, blur 0.1; composite erode 2, feather 0.4. Mask coverage 0.0325. DPI set to 300. Pipe-path score: changed_pipe_pct 0.5070, changed_non_pipe_pct 0.000383.
+
+### 2026-02-04 (Wed) — PID-7 R146
+- Command: `DONOR_PIPING_MASK_EXPAND=2 DONOR_PIPING_MASK_BLUR=0.2 COMPOSITE_MASK_ERODE=2 COMPOSITE_MASK_FEATHER=0.5 python3 -m rh_piping --pid 7 --product "Provence_Sofa112in_NaturalWeave_prod34270121_F_CC"`
+- Product: `Provence_Sofa112in_NaturalWeave_prod34270121_F_CC`
+- Donor (processed): `assets/processed/donor_image/Provence_Sofa112in_NaturalWeave_prod34270121_F_CC.png`
+- Prompt: `prompts/initial_prompt_PID-7.md`
+- Mask (model mask): `output/Provence_Sofa112in_NaturalWeave_prod34270121_F_CC/masks/ProvenceSo1bf4_PID-7_mask.png`
+- Output: `output/Provence_Sofa112in_NaturalWeave_prod34270121_F_CC/ProvenceSo1bf4_PID-7_gemini849_FM_R146.png`
+- Notes: Donor piping mask expanded 2px, blur 0.2; composite erode 2, feather 0.5. Mask coverage 0.0371. DPI set to 300. Pipe-path score: changed_pipe_pct 0.4826, changed_non_pipe_pct 0.002686.
+
+### 2026-02-04 (Wed) — PID-7 R1 (00Klismos)
+- Command: `MODEL_MASK_RATIO_TOL=0.05 DONOR_PIPING_MASK_EXPAND=2 DONOR_PIPING_MASK_BLUR=0.1 COMPOSITE_MASK_ERODE=2 COMPOSITE_MASK_FEATHER=0.4 python3 -m rh_piping --pid 7 --product "00Klismos_Aluminum72inSofaAltImage_Iron_prod38560941_E25624632065_F_Frank"`
+- Product: `00Klismos_Aluminum72inSofaAltImage_Iron_prod38560941_E25624632065_F_Frank`
+- Donor (processed): `assets/processed/donor_image/00Klismos_Aluminum72inSofaAltImage_Iron_prod38560941_E25624632065_F_Frank.png`
+- Prompt: `prompts/initial_prompt_PID-7.md`
+- Mask (model mask): `output/00Klismos_Aluminum72inSofaAltImage_Iron_prod38560941_E25624632065_F_Frank/masks/00KlismosA4a93_PID-7_mask.png`
+- Output: `output/00Klismos_Aluminum72inSofaAltImage_Iron_prod38560941_E25624632065_F_Frank/00KlismosA4a93_PID-7_gemini849_FM_R1.png`
+- Notes: Model mask resized to donor on last retry (ratio tol 0.05). Donor piping mask expanded 2px, blur 0.1; composite erode 2, feather 0.4. Mask coverage 0.0271. DPI set to 300. No pipe-path overlay available for this product.
+
+### 2026-02-04 (Wed) — PID-7 R2 (00Klismos)
+- Command: `MODEL_MASK_RATIO_TOL=0.05 DONOR_PIPING_MASK_EXPAND=3 DONOR_PIPING_MASK_BLUR=0.1 COMPOSITE_MASK_ERODE=2 COMPOSITE_MASK_FEATHER=0.4 python3 -m rh_piping --pid 7 --product "00Klismos_Aluminum72inSofaAltImage_Iron_prod38560941_E25624632065_F_Frank"`
+- Product: `00Klismos_Aluminum72inSofaAltImage_Iron_prod38560941_E25624632065_F_Frank`
+- Donor (processed): `assets/processed/donor_image/00Klismos_Aluminum72inSofaAltImage_Iron_prod38560941_E25624632065_F_Frank.png`
+- Prompt: `prompts/initial_prompt_PID-7.md`
+- Mask (model mask): `output/00Klismos_Aluminum72inSofaAltImage_Iron_prod38560941_E25624632065_F_Frank/masks/00KlismosA4a93_PID-7_mask.png`
+- Output: `output/00Klismos_Aluminum72inSofaAltImage_Iron_prod38560941_E25624632065_F_Frank/00KlismosA4a93_PID-7_gemini849_FM_R2.png`
+- Notes: Donor piping mask expanded 3px, blur 0.1; composite erode 2, feather 0.4. Mask coverage 0.0252. DPI set to 300. No pipe-path overlay available for this product.
+
+### 2026-02-04 (Wed) — PID-7 R3 (00Klismos)
+- Command: `MODEL_MASK_RATIO_TOL=0.05 DONOR_PIPING_MASK_EXPAND=2 DONOR_PIPING_MASK_BLUR=0.2 COMPOSITE_MASK_ERODE=2 COMPOSITE_MASK_FEATHER=0.5 python3 -m rh_piping --pid 7 --product "00Klismos_Aluminum72inSofaAltImage_Iron_prod38560941_E25624632065_F_Frank"`
+- Product: `00Klismos_Aluminum72inSofaAltImage_Iron_prod38560941_E25624632065_F_Frank`
+- Donor (processed): `assets/processed/donor_image/00Klismos_Aluminum72inSofaAltImage_Iron_prod38560941_E25624632065_F_Frank.png`
+- Prompt: `prompts/initial_prompt_PID-7.md`
+- Mask (model mask): `output/00Klismos_Aluminum72inSofaAltImage_Iron_prod38560941_E25624632065_F_Frank/masks/00KlismosA4a93_PID-7_mask.png`
+- Output: `output/00Klismos_Aluminum72inSofaAltImage_Iron_prod38560941_E25624632065_F_Frank/00KlismosA4a93_PID-7_gemini849_FM_R3.png`
+- Notes: Donor piping mask expanded 2px, blur 0.2; composite erode 2, feather 0.5. Mask coverage 0.0325. DPI set to 300. No pipe-path overlay available for this product.
